@@ -529,12 +529,13 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port, zQPType qp_type,
     // assert(event->event == RDMA_CM_EVENT_ESTABLISHED);
     
     struct PData server_pdata;
+    memset(&server_pdata, 0, sizeof(server_pdata));
     memcpy(&server_pdata, event->param.conn.private_data, sizeof(server_pdata));
 
     qp_instance->server_cmd_msg_ = server_pdata.buf_addr;
     qp_instance->server_cmd_rkey_ = server_pdata.buf_rkey;
     qp_instance->conn_id_ = server_pdata.id;
-    for(int i = 0; i < 8; i++){
+    for(int i = 0; i < server_pdata.nic_num_; i++){
         zTarget* target;
         if(qp->m_targets.find(i) != qp->m_targets.end()){
             target = qp->m_targets[i];
@@ -970,8 +971,8 @@ int zQP_accept(zQP *qp, zQP_responder *qp_instance, int nic_index, rdma_cm_id *c
     result = rdma_create_qp(cm_id, qp->m_pd->m_pds[nic_index], &qp_init_attr);
     assert(result == 0);
 
-       
     struct PData rep_pdata;
+    memset(&rep_pdata, 0, sizeof(rep_pdata));
     CmdMsgBlock *cmd_msg = nullptr;
     CmdMsgRespBlock *cmd_resp = nullptr;
     struct ibv_mr *msg_mr = nullptr;

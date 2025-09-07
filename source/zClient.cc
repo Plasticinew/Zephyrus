@@ -24,8 +24,8 @@ void test_zQP(string config_file, string remote_config_file) {
         uint32_t rkey;
         zQP_RPC_Alloc(rpc_qps[i], &addr, &rkey, alloc_size);
         printf("Allocated memory at addr: %lx, rkey: %u\n", addr, rkey);
-        void* local_buf; uint32_t rkey;
-        ibv_mr* mr = mr_malloc_create(pd, (uint64_t&)local_buf, rkey, alloc_size);
+        void* local_buf; uint32_t local_rkey;
+        ibv_mr* mr = mr_malloc_create(pd, (uint64_t&)local_buf, local_rkey, alloc_size);
          if (mr == NULL) {
             printf("Memory registration failed\n");
             return;
