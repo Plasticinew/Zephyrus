@@ -781,11 +781,11 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
         qp->time_stamp = 0;
         std::cerr << "Warning, switch to device " << qp->current_device << std::endl;
         // new std::thread(&zQP_connect, qp, qp->current_device, qp->m_requestors[qp->current_device]->conn_id_);
-        int result = z_recovery(qp);
-        if (result != 0) {
-            std::cerr << "Error, recovery failed" << std::endl;
-            return -1;
-        }
+        // int result = z_recovery(qp);
+        // if (result != 0) {
+        //     std::cerr << "Error, recovery failed" << std::endl;
+        //     return -1;
+        // }
         return zDCQP_read(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
     }
     if(qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
@@ -796,10 +796,10 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
             std::cerr << "Error, connection lost, start recovery" << std::endl;
             // new std::thread(&zQP_connect, qp, qp->current_device, qp->m_requestors[qp->current_device]->conn_id_);
-            result = z_recovery(qp);
-            if (result != 0) {
-                std::cerr << "Error, recovery failed" << std::endl;
-            }
+            // result = z_recovery(qp);
+            // if (result != 0) {
+            //     std::cerr << "Error, recovery failed" << std::endl;
+            // }
             return 0;
         }
         return 0;
