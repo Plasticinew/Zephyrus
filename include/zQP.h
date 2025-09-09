@@ -313,6 +313,8 @@ int zQP_read(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t
 
 int zQP_write(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
 
+int zQP_write_nolog(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
 
 int worker_write(ibv_qp *qp, ibv_cq *cq, uint64_t local_addr, uint32_t lkey, uint32_t length, uint64_t remote_addr, uint32_t rkey);
