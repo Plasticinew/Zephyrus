@@ -25,7 +25,7 @@ namespace Zephyrus {
 
 #define NOTIFY_WORK 0xFF
 #define NOTIFY_IDLE 0x00
-#define MAX_MSG_SIZE 512
+#define MAX_MSG_SIZE 1024
 #define MAX_SERVER_WORKER 1
 #define MAX_SERVER_CLIENT 4096
 #define RESOLVE_TIMEOUT_MS 5000
@@ -209,9 +209,6 @@ struct zQP_requestor
     rdma_event_channel* channel_;
     rdma_cm_id* cm_id_;
     zStatus status_;
-    zWR_entry wr_entry_[WR_ENTRY_NUM];
-    int entry_start_ = 0;
-    int entry_end_ = 0;
     struct CmdMsgBlock *cmd_msg_;
     struct CmdMsgRespBlock *cmd_resp_;
     struct ibv_mr *msg_mr_;
@@ -283,6 +280,14 @@ struct zQP
     int primary_device = 0;
     int current_device = 0;
     uint16_t time_stamp;
+    CmdMsgBlock *cmd_msg_;
+    CmdMsgRespBlock *cmd_resp_;
+    unordered_map<int, ibv_mr*> msg_mr_;
+    unordered_map<int, ibv_mr*> resp_mr_;
+    zWR_entry wr_entry_[WR_ENTRY_NUM];
+    int entry_start_ = 0;
+    int entry_end_ = 0;
+    zQPType qp_type;
 };
 
 
@@ -291,7 +296,7 @@ zEndpoint* zEP_create(string config_file);
 
 zPD* zPD_create(zEndpoint *ep, int pool_size);
 
-zQP* zQP_create(zPD* pd, zEndpoint *ep, rkeyTable* table);
+zQP* zQP_create(zPD* pd, zEndpoint *ep, rkeyTable* table, zQPType qp_type);
 
 zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd);
 
@@ -299,9 +304,11 @@ int zDCQP_read(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_
 
 int zDCQP_write(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
 
+int z_recovery(zQP *qp);
+
 zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd);
 
-int zQP_connect(zQP *qp, int nic_index, string ip, string port, zQPType qp_type, int node_id);
+int zQP_connect(zQP *qp, int nic_index, string ip, string port, int node_id);
 
 int zQP_listen(zQP *qp, int nic_index, string ip, string port);
 
@@ -309,11 +316,9 @@ int zQP_accept(zQP *qp, zQP_responder *qp_instance, int nic_index, rdma_cm_id *c
 
 void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint32_t num);
 
-int zQP_read(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
 
-int zQP_write(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
-
-int zQP_write_nolog(zQP_requestor *requestor, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log);
 
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
 
@@ -329,6 +334,6 @@ int load_config(const char* fname, struct zTargetConfig* config);
 
 ibv_mr* mr_create(ibv_pd *pd, void *addr, size_t length);
 
-ibv_mr* mr_malloc_create(zPD* pd, uint64_t &addr, uint32_t &rkey, size_t length);
+ibv_mr* mr_malloc_create(zPD* pd, uint64_t &addr, size_t length);
 
 }

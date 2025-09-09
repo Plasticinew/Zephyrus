@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
     zEndpoint *ep = zEP_create(config_file);
     zPD *pd = zPD_create(ep, 1);
     rkeyTable *table = new rkeyTable();
-    zQP *qp = zQP_create(pd, ep, table);
+    zQP *qp = zQP_create(pd, ep, table, ZQP_RPC);
     std::thread listener = std::thread(&zQP_listen, qp, 0, std::ref(ep->m_devices[0]->eth_ip), std::ref(ep->m_devices[0]->port));
     listener.join();
     return 0;

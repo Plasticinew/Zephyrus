@@ -11,11 +11,11 @@ void test_zQP(string config_file, string remote_config_file) {
     zTargetConfig config;
     load_config(remote_config_file.c_str(), &config);
     for(int i = 0; i < config.num_nodes; i ++) {
-        zQP* qp = zQP_create(pd, ep, table);
-        zQP_connect(qp, 0, config.target_ips[i], config.target_ports[i], ZQP_ONESIDED, 0);
+        zQP* qp = zQP_create(pd, ep, table, ZQP_ONESIDED);
+        zQP_connect(qp, 0, config.target_ips[i], config.target_ports[i], 0);
         qps.push_back(qp);
-        zQP* rpc_qp = zQP_create(pd, ep, table);
-        zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i], ZQP_RPC, 0);
+        zQP* rpc_qp = zQP_create(pd, ep, table, ZQP_RPC);
+        zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i], 0);
         rpc_qps.push_back(rpc_qp);
     }
     size_t alloc_size = 1024*1024;
@@ -24,8 +24,8 @@ void test_zQP(string config_file, string remote_config_file) {
         uint32_t rkey;
         zQP_RPC_Alloc(rpc_qps[i], &addr, &rkey, alloc_size);
         printf("Allocated memory at addr: %lx, rkey: %u\n", addr, rkey);
-        void* local_buf; uint32_t local_rkey;
-        ibv_mr* mr = mr_malloc_create(pd, (uint64_t&)local_buf, local_rkey, alloc_size);
+        void* local_buf; 
+        ibv_mr* mr = mr_malloc_create(pd, (uint64_t&)local_buf, alloc_size);
          if (mr == NULL) {
             printf("Memory registration failed\n");
             return;
