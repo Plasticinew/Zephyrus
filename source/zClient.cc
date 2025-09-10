@@ -12,10 +12,10 @@ void test_zQP(string config_file, string remote_config_file) {
     load_config(remote_config_file.c_str(), &config);
     for(int i = 0; i < config.num_nodes; i ++) {
         zQP* qp = zQP_create(pd, ep, table, ZQP_ONESIDED);
-        zQP_connect(qp, 0, config.target_ips[i], config.target_ports[i], 0);
+        zQP_connect(qp, 0, config.target_ips[i], config.target_ports[i]);
         qps.push_back(qp);
         zQP* rpc_qp = zQP_create(pd, ep, table, ZQP_RPC);
-        zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i], 0);
+        zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i]);
         rpc_qps.push_back(rpc_qp);
     }
     size_t alloc_size = 1024*1024;
@@ -46,6 +46,17 @@ void test_zQP(string config_file, string remote_config_file) {
         for(int j = 0; j < alloc_size; j ++) {
             if(((char*)local_buf)[j] != 1) {
                 printf("Data mismatch at byte %d\n", j);
+                break;
+            }
+        }
+        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+            zQP_CAS(qps[i], (uint64_t*)local_buf, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, 0);
+        }
+        memset(local_buf, 0, alloc_size);
+        z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
+        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+            if(((uint64_t*)local_buf)[j] != 2) {
+                printf("CAS Data mismatch at uint64 %d, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
                 break;
             }
         }

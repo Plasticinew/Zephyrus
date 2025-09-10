@@ -15,11 +15,13 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/foreach.hpp>
+#include <atomic>
 
 using std::string;
 using std::vector;
 using std::unordered_map;
 using std::thread;
+using std::atomic;
 
 namespace Zephyrus {
 
@@ -107,6 +109,10 @@ struct PData {
     uint32_t dct_num_[8];
     char ip[8][16];
     char port[8][8];
+    uint64_t qp_info_addr;
+    uint32_t qp_info_rkey[8];
+    uint64_t atomic_table_addr;
+    uint32_t atomic_table_rkey[8];
 };
 
 struct CmdMsgBlock {
@@ -146,6 +152,11 @@ public:
     uint32_t rkey[8];
 };
 CHECK_RDMA_MSG_SIZE(RegisterResponse);
+
+
+#define WR_ENTRY_NUM 1024
+#define MAX_QP_NUM 1024
+#define ATOMIC_ENTRY_NUM 512
 
 inline void z_debug(const char *fmt, ...)
 {
@@ -197,9 +208,27 @@ struct zWR_entry {
     uint64_t wr_addr:48;
     uint64_t time_stamp:15;
     uint64_t finished:1;
+    uint64_t reserved;
 };
 
-#define WR_ENTRY_NUM 1024
+struct qp_info_table {
+    uint64_t addr;
+    uint32_t rkey[8];
+};
+
+struct zAtomic_entry {
+    uint64_t offset:32;
+    uint64_t qp_id:16;
+    uint64_t time_stamp:16;
+};
+
+struct zAtomic_buffer{
+    uint64_t buffer;
+    uint64_t target_addr:48;
+    uint64_t time_stamp:15;
+    uint64_t finished:1;
+};
+
 
 struct zQP_requestor
 {
@@ -235,19 +264,6 @@ struct zQP_responder_connection{
     rdma_cm_id* cm_id_;
     struct ibv_cq *cq_;
     zStatus status_;
-    CmdMsgBlock* qp_log_[1024];
-    struct ibv_mr* qp_log_list_[1024];
-};
-
-struct zQP_responder
-{
-    rdma_event_channel* channel_;
-    rdma_cm_id* cm_id_;
-    ibv_pd* pd_;
-    vector<zQP_responder_connection*> connections;
-    uint32_t worker_num_ = 0;
-    WorkerInfo** worker_info_;
-    thread **worker_threads_;
 };
 
 struct zTarget{
@@ -269,13 +285,34 @@ struct zEndpoint
     int m_node_id;
 };
 
+struct zQP_responder
+{
+    rdma_event_channel* channel_;
+    rdma_cm_id* cm_id_;
+    ibv_pd* pd_;
+    vector<zQP_responder_connection*> connections;
+    uint32_t worker_num_ = 0;
+    WorkerInfo** worker_info_;
+    thread **worker_threads_;
+};
+
+struct zQP_listener {
+    zPD *m_pd;
+    zEndpoint *m_ep;
+    unordered_map<int, zQP_responder*> listeners;
+    atomic<int> qp_num_ = 1;
+    // CmdMsgBlock* qp_log_[MAX_QP_NUM];
+    // struct ibv_mr* qp_log_list_[MAX_QP_NUM];
+    qp_info_table* qp_info;
+    uint32_t qp_info_rkey[8];
+};
+
 struct zQP
 {
     zPD *m_pd;
     zEndpoint *m_ep;
     rkeyTable *m_rkey_table;
     unordered_map<int, zQP_requestor*> m_requestors;
-    unordered_map<int, zQP_responder*> m_responders;
     unordered_map<int, zTarget*> m_targets;
     int primary_device = 0;
     int current_device = 0;
@@ -288,15 +325,20 @@ struct zQP
     int entry_start_ = 0;
     int entry_end_ = 0;
     zQPType qp_type;
+    int qp_id_ = 0;
+    uint64_t remote_atomic_table_addr = 0;
+    uint32_t remote_atomic_table_rkey[8];
+    uint64_t remote_qp_info_addr = 0;
+    uint32_t remote_qp_info_rkey[8];
 };
-
-
 
 zEndpoint* zEP_create(string config_file);
 
 zPD* zPD_create(zEndpoint *ep, int pool_size);
 
 zQP* zQP_create(zPD* pd, zEndpoint *ep, rkeyTable* table, zQPType qp_type);
+
+zQP_listener* zQP_listener_create(zPD* pd, zEndpoint *ep);
 
 zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd);
 
@@ -308,17 +350,21 @@ int z_recovery(zQP *qp);
 
 zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd);
 
-int zQP_connect(zQP *qp, int nic_index, string ip, string port, int node_id);
+int zQP_connect(zQP *qp, int nic_index, string ip, string port);
 
-int zQP_listen(zQP *qp, int nic_index, string ip, string port);
+int zQP_listen(zQP_listener *zqp, int nic_index, string ip, string port);
 
-int zQP_accept(zQP *qp, zQP_responder *qp_instance, int nic_index, rdma_cm_id *cm_id, zQPType qp_type, int node_id);
+int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_type, int node_id);
 
 void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint32_t num);
 
 int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
 
 int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log);
+
+bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+
+bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, zAtomic_entry* entry);
 
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
 
