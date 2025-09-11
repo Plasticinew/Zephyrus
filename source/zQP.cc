@@ -702,10 +702,11 @@ int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* r
                 end_ += WR_ENTRY_NUM;
             if(start_ != end_){
                 for(int i = start_; i < end_; i++){
-                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == wc.wr_id){
-                        delete ((ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr)->sg_list;
-                        delete (ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr;
-                        zqp->wr_entry_[zqp->entry_end_].wr_addr = 0;
+                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == time_stamp &&
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr){
+                        delete ((ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr)->sg_list;
+                        delete (ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr = 0;
                     }
                     if(zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0 && i%WR_ENTRY_NUM == zqp->entry_start_){
                         zqp->entry_start_ = (zqp->entry_start_ + 1)%WR_ENTRY_NUM;
@@ -734,7 +735,7 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
     entry->finished = 1;
     if(use_log){
         log_sge->addr = (uint64_t)(entry);
-        log_sge->length = sizeof(uint64_t);
+        log_sge->length = sizeof(zWR_entry);
         log_sge->lkey = 0;
         log_wr->wr_id = time_stamp;
         log_wr->sg_list = log_sge;
@@ -805,7 +806,11 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
             break;
         }
     }
-
+    delete entry;
+    if(use_log){
+        delete log_sge;
+        delete log_wr;
+    }
     return 0;
 }
 
@@ -834,6 +839,7 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
     send_wr->wr.atomic.rkey = rkey;
     send_wr->wr.atomic.compare_add = *compare;
     send_wr->wr.atomic.swap = *(uint64_t*)entry;
+    printf("CAS: %lu --> %lu\n", *compare, *(uint64_t*)entry);
 
     struct ibv_sge *buffer_sge = new ibv_sge();
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
@@ -851,13 +857,14 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
     buffer_wr->num_sge = 1;
     buffer_wr->next = send_wr;
     buffer_wr->opcode = IBV_WR_RDMA_WRITE;
-    buffer_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+    buffer_wr->send_flags = IBV_SEND_INLINE;
     buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + zqp->entry_end_ * sizeof(zAtomic_buffer);
     buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_;
 
     ibv_qp* qp = requestor->qp_;
-    if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
-        std::cerr << "Error, ibv_post_send failed" << std::endl;
+    int result;
+    if (result = ibv_post_send(qp, buffer_wr, &bad_send_wr)) {
+        std::cerr << "Error, ibv_post_send failed:" << result << std::endl;
         return -1;
     }
 
@@ -884,10 +891,11 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
                 end_ += WR_ENTRY_NUM;
             if(start_ != end_){
                 for(int i = start_; i < end_; i++){
-                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == wc.wr_id){
-                        delete ((ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr)->sg_list;
-                        delete (ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr;
-                        zqp->wr_entry_[zqp->entry_end_].wr_addr = 0;
+                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == time_stamp &&
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr){
+                        delete ((ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr)->sg_list;
+                        delete (ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr = 0;
                     }
                     if(zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0 && i%WR_ENTRY_NUM == zqp->entry_start_){
                         zqp->entry_start_ = (zqp->entry_start_ + 1)%WR_ENTRY_NUM;
@@ -897,11 +905,16 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
             break;
         }
     }
-    if(*compare != *((uint64_t*)zqp->cmd_msg_)){
-        *compare = *((uint64_t*)zqp->cmd_msg_);
+    if(*compare != *((uint64_t*)requestor->cmd_resp_)){
+        printf("CAS failed, expect %lu, get %lu\n", *compare, *((uint64_t*)requestor->cmd_resp_));
+        *compare = *((uint64_t*)requestor->cmd_resp_);
         return false;
     }
     zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
+    delete entry;
+    delete buffer;
+    delete buffer_sge;
+    delete buffer_wr;
     return true;
 }
 
@@ -920,11 +933,12 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
     send_wr->num_sge = 1;
     send_wr->next = NULL;
     send_wr->opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
-    send_wr->send_flags = IBV_SEND_SIGNALED;
+    send_wr->send_flags = 0;
     send_wr->wr.atomic.remote_addr = (uint64_t)remote_addr;
     send_wr->wr.atomic.rkey = rkey;
     send_wr->wr.atomic.compare_add = *(uint64_t*)entry;
     send_wr->wr.atomic.swap = new_val;
+    printf("CAS: %lu --> %lu\n", *(uint64_t*)entry, new_val);
 
     struct ibv_sge *buffer_sge = new ibv_sge();
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
@@ -937,8 +951,8 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
     buffer->finished = 1;
     uint64_t check_val = *((uint64_t*)(buffer)+1);
     printf("old: %lu, check: %lu\n", old_val, check_val);
-    
-    buffer_sge->addr = (uint64_t)requestor->cmd_resp_;
+
+    buffer_sge->addr = (uint64_t)((uint64_t*)(requestor->cmd_resp_)+1);
     buffer_sge->length = sizeof(uint64_t);
     buffer_sge->lkey = requestor->resp_mr_->lkey;
     buffer_wr->wr_id = time_stamp;
@@ -947,10 +961,10 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
     buffer_wr->next = NULL;
     buffer_wr->opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
     buffer_wr->send_flags = IBV_SEND_SIGNALED;
-    buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry->offset * sizeof(zAtomic_buffer) + sizeof(uint64_t);
-    buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_;
-    send_wr->wr.atomic.compare_add = check_val;
-    send_wr->wr.atomic.swap = new_val;
+    buffer_wr->wr.atomic.remote_addr = requestor->server_cmd_msg_ + entry->offset * sizeof(zAtomic_buffer) + sizeof(uint64_t);
+    buffer_wr->wr.atomic.rkey = requestor->server_cmd_rkey_;
+    buffer_wr->wr.atomic.compare_add = old_val;
+    buffer_wr->wr.atomic.swap = check_val;
     send_wr->next = buffer_wr;
 
     ibv_qp* qp = requestor->qp_;
@@ -974,6 +988,12 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
             }
             break;
         }
+    }
+    if(*(uint64_t*)entry != *((uint64_t*)requestor->cmd_resp_)){
+        printf("CAS failed, expect %lu, get %lu\n", *(uint64_t*)entry, *((uint64_t*)requestor->cmd_resp_));
+    }
+    if(old_val != *((uint64_t*)(requestor->cmd_resp_)+1)){
+        printf("Error, atomic write failed, expect %lu, get %lu\n", old_val, *((uint64_t*)(requestor->cmd_resp_)+1));
     }
     return true;
 }
@@ -1346,7 +1366,7 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     //     zqp->qp_log_list_[node_id] = mr_create(zqp->m_pd->m_pds[nic_index], (void *)zqp->qp_log_[node_id], sizeof(CmdMsgBlock));
     // }
     if(zqp->qp_info[node_id].addr == 0) {
-        ibv_mr* mr = mr_malloc_create(zqp->m_pd, zqp->qp_info[node_id].addr, sizeof(zAtomic_buffer)*ATOMIC_ENTRY_NUM);
+        ibv_mr* mr = mr_malloc_create(zqp->m_pd, zqp->qp_info[node_id].addr, sizeof(zAtomic_buffer)*WR_ENTRY_NUM);
         for(int i = 0; i < zqp->m_pd->m_mrs[mr].size(); i++){
             zqp->qp_info[node_id].rkey[i] = zqp->m_pd->m_mrs[mr][i]->rkey;
         }
