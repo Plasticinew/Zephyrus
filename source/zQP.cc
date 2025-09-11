@@ -295,7 +295,7 @@ zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd) {
 
     dcqp->qp_mlx_ex_ = mlx5dv_qp_ex_from_ibv_qp_ex(dcqp->qp_ex_);
     
-    return 0;
+    return dcqp;
 }
 
 zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd) { 
@@ -571,9 +571,10 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
 
     qp_instance->server_cmd_msg_ = server_pdata.buf_addr;
     qp_instance->server_cmd_rkey_ = server_pdata.buf_rkey;
-    qp_instance->conn_id_ = server_pdata.id;
+    qp_instance->conn_id_ = server_pdata.conn_id;
+    qp_instance->qp_id_ = server_pdata.qp_id;
     if(qp->qp_id_ == 0){
-        qp->qp_id_ = server_pdata.id;
+        qp->qp_id_ = server_pdata.qp_id;
     }
     for(int i = 0; i < server_pdata.nic_num_; i++){
         zTarget* target;
@@ -790,10 +791,11 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
                 end_ += WR_ENTRY_NUM;
             if(start_ != end_){
                 for(int i = start_; i < end_; i++){
-                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == wc.wr_id){
-                        delete ((ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr)->sg_list;
-                        delete (ibv_send_wr*)zqp->wr_entry_[zqp->entry_end_].wr_addr;
-                        zqp->wr_entry_[zqp->entry_end_].wr_addr = 0;
+                    if(zqp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == time_stamp &&
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr){
+                        delete ((ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr)->sg_list;
+                        delete (ibv_send_wr*)zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+                        zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr = 0;
                     }
                     if(zqp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0 && i%WR_ENTRY_NUM == zqp->entry_start_){
                         zqp->entry_start_ = (zqp->entry_start_ + 1)%WR_ENTRY_NUM;
@@ -1351,10 +1353,11 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     }
     // rep_pdata.id = -1;
     if(node_id == 0) {
-        rep_pdata.id = id;
+        rep_pdata.qp_id = id;
     } else {
-        rep_pdata.id = node_id;
+        rep_pdata.qp_id = node_id;
     }
+    rep_pdata.conn_id = -1;
     if(qp_type == ZQP_RPC){
         int num = qp_instance->worker_num_;
         if (num < MAX_SERVER_WORKER) {
@@ -1376,6 +1379,7 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
             qp_instance->worker_info_[num]->cm_id = cm_id;
             qp_instance->worker_info_[num]->cq = cq;
         } 
+        rep_pdata.conn_id = num;
         qp_instance->worker_num_ += 1;
     } 
     if(qp_type == ZQP_RPC){

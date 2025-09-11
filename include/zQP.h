@@ -100,7 +100,8 @@ struct CNodeInit{
 struct PData {
     uint64_t buf_addr;
     uint32_t buf_rkey;
-    uint16_t id;
+    uint16_t qp_id;
+    uint16_t conn_id;
     uint32_t size;
     uint16_t nic_num_;
     uint64_t gid1[MAX_NIC_NUM], gid2[MAX_NIC_NUM];
@@ -247,7 +248,7 @@ struct zQP_requestor
     uint16_t lid_;
     uint32_t dct_num_;
     uint32_t conn_id_;
-
+    uint32_t qp_id_;
 };
 
 struct WorkerInfo {
