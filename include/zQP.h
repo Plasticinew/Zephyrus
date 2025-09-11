@@ -44,13 +44,15 @@ namespace Zephyrus {
     static_assert(sizeof(T) < MAX_MSG_SIZE, #T " msg size is too big!")
 
 
+#define MAX_NIC_NUM 2
+
 struct zDeviceConfig {
     uint16_t node_id;
     uint16_t num_devices;
-    string eth_names[8];
-    string mlx_names[8];
-    string ports[8];
-    string ips[8];
+    string eth_names[MAX_NIC_NUM];
+    string mlx_names[MAX_NIC_NUM];
+    string ports[MAX_NIC_NUM];
+    string ips[MAX_NIC_NUM];
 };
 
 struct zTargetConfig {
@@ -94,25 +96,22 @@ struct CNodeInit{
     zQPType qp_type;
 };
 
+
 struct PData {
     uint64_t buf_addr;
     uint32_t buf_rkey;
-    uint64_t size;
     uint16_t id;
-    uint64_t block_size_;
-    uint64_t block_num_;
-    uint64_t section_header_;
-    uint64_t heap_start_;
+    uint32_t size;
     uint16_t nic_num_;
-    uint64_t gid1[8], gid2[8], interface[8], subnet[8];
-    uint16_t lid_[8];
-    uint32_t dct_num_[8];
-    char ip[8][16];
-    char port[8][8];
+    uint64_t gid1[MAX_NIC_NUM], gid2[MAX_NIC_NUM];
+    uint16_t lid_[MAX_NIC_NUM];
+    uint32_t dct_num_[MAX_NIC_NUM];
+    char ip[MAX_NIC_NUM][16];
+    char port[MAX_NIC_NUM][8];
     uint64_t qp_info_addr;
-    uint32_t qp_info_rkey[8];
+    uint32_t qp_info_rkey[MAX_NIC_NUM];
     uint64_t atomic_table_addr;
-    uint32_t atomic_table_rkey[8];
+    uint32_t atomic_table_rkey[MAX_NIC_NUM];
 };
 
 struct CmdMsgBlock {
@@ -149,7 +148,7 @@ CHECK_RDMA_MSG_SIZE(RegisterRequest);
 class RegisterResponse : public ResponseMsg {
 public:
     uint64_t addr;
-    uint32_t rkey[8];
+    uint32_t rkey[MAX_NIC_NUM];
 };
 CHECK_RDMA_MSG_SIZE(RegisterResponse);
 
@@ -213,7 +212,7 @@ struct zWR_entry {
 
 struct qp_info_table {
     uint64_t addr;
-    uint32_t rkey[8];
+    uint32_t rkey[MAX_NIC_NUM];
 };
 
 struct zAtomic_entry {
@@ -304,7 +303,7 @@ struct zQP_listener {
     // CmdMsgBlock* qp_log_[MAX_QP_NUM];
     // struct ibv_mr* qp_log_list_[MAX_QP_NUM];
     qp_info_table* qp_info;
-    uint32_t qp_info_rkey[8];
+    uint32_t qp_info_rkey[MAX_NIC_NUM];
 };
 
 struct zQP
@@ -327,9 +326,9 @@ struct zQP
     zQPType qp_type;
     int qp_id_ = 0;
     uint64_t remote_atomic_table_addr = 0;
-    uint32_t remote_atomic_table_rkey[8];
+    uint32_t remote_atomic_table_rkey[MAX_NIC_NUM];
     uint64_t remote_qp_info_addr = 0;
-    uint32_t remote_qp_info_rkey[8];
+    uint32_t remote_qp_info_rkey[MAX_NIC_NUM];
 };
 
 zEndpoint* zEP_create(string config_file);

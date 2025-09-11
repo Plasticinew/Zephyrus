@@ -588,7 +588,7 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
         else{
             target = new zTarget();
             qp->m_targets[i] = target;
-            target->ah = zDCQP_create_ah(qp->m_pd->m_requestors[i][0], server_pdata.gid1[i], server_pdata.gid2[i], server_pdata.interface[i], server_pdata.subnet[i], server_pdata.lid_[i]);
+            target->ah = zDCQP_create_ah(qp->m_pd->m_requestors[i][0], server_pdata.gid1[i], server_pdata.gid2[i], server_pdata.gid2[i], server_pdata.gid1[i], server_pdata.lid_[i]);
             target->lid_ = server_pdata.lid_[i];
             target->dct_num_ = server_pdata.dct_num_[i];
             target->ip = string(server_pdata.ip[i]);
@@ -605,7 +605,7 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
 
     if(qp->remote_atomic_table_addr == 0) {
         qp->remote_atomic_table_addr = server_pdata.atomic_table_addr;
-        for(int i = 0; i < 8; i ++) {
+        for(int i = 0; i < MAX_NIC_NUM; i ++) {
             qp->remote_atomic_table_rkey[i] = server_pdata.atomic_table_rkey[i];
         }
     }
@@ -615,7 +615,7 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
     }
     if(qp->remote_qp_info_addr == 0) {
         qp->remote_qp_info_addr = server_pdata.qp_info_addr;
-        for(int i = 0; i < 8 ; i ++) {
+        for(int i = 0; i < MAX_NIC_NUM ; i ++) {
             qp->remote_qp_info_rkey[i] = server_pdata.qp_info_rkey[i];
         }
     }
@@ -1053,7 +1053,7 @@ void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size){
       return ;
     }
     *addr = resp_msg->addr;
-    for(int i = 0; i < 8; i++){
+    for(int i = 0; i < MAX_NIC_NUM; i++){
         if(qp->m_rkey_table->find(resp_msg->rkey[0]) == qp->m_rkey_table->end())
             (*qp->m_rkey_table)[resp_msg->rkey[0]] = std::vector<uint32_t>();
         qp->m_rkey_table->at(resp_msg->rkey[0]).push_back(resp_msg->rkey[i]);
@@ -1391,18 +1391,18 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     rep_pdata.size = sizeof(CmdMsgRespBlock);
     rep_pdata.nic_num_ = zqp->m_pd->m_responders.size();
     rep_pdata.qp_info_addr = (uint64_t)(zqp->qp_info);
-    for(int i = 0; i < 8; i++){
+    for(int i = 0; i < MAX_NIC_NUM; i++){
         rep_pdata.qp_info_rkey[i] = zqp->qp_info_rkey[i];
     }
     rep_pdata.atomic_table_addr = (uint64_t)(zqp->qp_info[node_id].addr);
-    for(int i = 0; i < 8; i++){
+    for(int i = 0; i < MAX_NIC_NUM; i++){
         rep_pdata.atomic_table_rkey[i] = zqp->qp_info[node_id].rkey[i];
     }
     for(int i = 0; i < rep_pdata.nic_num_; i++){
         rep_pdata.gid1[i] = zqp->m_pd->m_responders[i][0]->gid1;
         rep_pdata.gid2[i] = zqp->m_pd->m_responders[i][0]->gid2;
-        rep_pdata.interface[i] = zqp->m_pd->m_responders[i][0]->interface;
-        rep_pdata.subnet[i] = zqp->m_pd->m_responders[i][0]->subnet;
+        // rep_pdata.interface[i] = zqp->m_pd->m_responders[i][0]->interface;
+        // rep_pdata.subnet[i] = zqp->m_pd->m_responders[i][0]->subnet;
         rep_pdata.lid_[i] = zqp->m_pd->m_responders[i][0]->lid_;
         rep_pdata.dct_num_[i] = zqp->m_pd->m_responders[i][0]->dct_num_;
         memcpy(rep_pdata.ip[i], zqp->m_ep->m_devices[nic_index]->eth_ip.c_str(), zqp->m_ep->m_devices[nic_index]->eth_ip.size());
