@@ -870,6 +870,8 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
 
     zqp->wr_entry_[zqp->entry_end_].time_stamp = time_stamp;
     zqp->wr_entry_[zqp->entry_end_].wr_addr = (uint64_t)send_wr;
+    zqp->wr_entry_[zqp->entry_end_].finished = 0;
+    zqp->wr_entry_[zqp->entry_end_].reserved = new_val;
     zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
 
     auto start = TIME_NOW;
@@ -1163,25 +1165,50 @@ int z_recovery(zQP *qp) {
             if(qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0){
                 continue;
             } 
-            int local_time = qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp;
-            int remote_time = entry[i%WR_ENTRY_NUM].time_stamp;
-            if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
-                // attention: 48bit address to 64bit address
-                struct ibv_send_wr *send_wr = (struct ibv_send_wr *)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
-                while(send_wr != NULL){
-                    if(send_wr->opcode == IBV_WR_RDMA_WRITE){
-                        if (send_wr->send_flags == (IBV_SEND_SIGNALED | IBV_SEND_INLINE)){
-                            // log write
-                            send_wr = send_wr->next;
-                            continue;
+            struct ibv_send_wr *send_wr = (struct ibv_send_wr *)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+            if (send_wr->opcode == IBV_WR_ATOMIC_CMP_AND_SWP){
+                zAtomic_buffer* buffer = (zAtomic_buffer*)(&entry[i%WR_ENTRY_NUM]);
+                int local_time = qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp;
+                int remote_time = buffer->time_stamp;
+                if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
+                    // resend CAS
+                    zQP_CAS(qp, (uint64_t*)&send_wr->wr.atomic.compare_add, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey, qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp);
+                    continue;
+                }
+                if(buffer->finished == 1) {
+                    int return_val = send_wr->wr.atomic.compare_add;
+                    continue;
+                }
+                int new_val = qp->wr_entry_[i%WR_ENTRY_NUM].reserved;
+                z_read(qp, (void*)&entry[i%WR_ENTRY_NUM].reserved, qp->resp_mr_[qp->current_device]->lkey, sizeof(uint64_t), (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
+                if(entry[i%WR_ENTRY_NUM].reserved == send_wr->wr.atomic.swap){
+                    // TODO: try CAS_step 2?
+                    continue;    
+                } else {
+                    // send but failed
+                    int return_val = entry[i%WR_ENTRY_NUM].reserved;
+                }
+            } else {
+                int local_time = qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp;
+                int remote_time = entry[i%WR_ENTRY_NUM].time_stamp;
+                
+                if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
+                    // attention: 48bit address to 64bit address
+                    while(send_wr != NULL){
+                        if(send_wr->opcode == IBV_WR_RDMA_WRITE){
+                            if (send_wr->send_flags == (IBV_SEND_SIGNALED | IBV_SEND_INLINE)){
+                                // log write
+                                send_wr = send_wr->next;
+                                continue;
+                            }
+                            z_write(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
+                        } else if(send_wr->opcode == IBV_WR_RDMA_READ){
+                            z_read(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
+                        } else {
+                            printf("Error, unsupported opcode %d\n", send_wr->opcode);
                         }
-                        z_write(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
-                    } else if(send_wr->opcode == IBV_WR_RDMA_READ){
-                        z_read(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
-                    } else {
-                        printf("Error, unsupported opcode %d\n", send_wr->opcode);
+                        send_wr = send_wr->next;
                     }
-                    send_wr = send_wr->next;
                 }
             }
         }
