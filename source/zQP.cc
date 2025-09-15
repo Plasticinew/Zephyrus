@@ -888,7 +888,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     send_wr->num_sge = 1;
     send_wr->next = NULL;
     send_wr->opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
-    send_wr->send_flags = IBV_SEND_SIGNALED;
+    send_wr->send_flags = 0;
     send_wr->wr.atomic.remote_addr = (uint64_t)remote_addr;
     send_wr->wr.atomic.rkey = rkey;
     send_wr->wr.atomic.compare_add = expected;
@@ -909,15 +909,16 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     buffer_wr->wr_id = time_stamp;
     buffer_wr->sg_list = buffer_sge;
     buffer_wr->num_sge = 1;
-    buffer_wr->next = send_wr;
+    buffer_wr->next = NULL;
     buffer_wr->opcode = IBV_WR_RDMA_WRITE;
-    buffer_wr->send_flags = IBV_SEND_INLINE;
+    buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
     buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + zqp->entry_end_ * sizeof(zAtomic_buffer);
     buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_;
+    send_wr->next = buffer_wr;
 
     ibv_qp* qp = requestor->qp_;
     int result;
-    if (result = ibv_post_send(qp, buffer_wr, &bad_send_wr)) {
+    if (result = ibv_post_send(qp, send_wr, &bad_send_wr)) {
         std::cerr << "Error, ibv_post_send failed:" << result << std::endl;
         return -1;
     }
@@ -965,8 +966,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
         printf("CAS failed, expect %lu, get %lu\n", expected, *((uint64_t*)local_addr));
         return 0;
     }
-    // zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
-    usleep(10000);
+    zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
     delete entry;
     delete buffer;
     delete buffer_sge;
