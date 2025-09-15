@@ -200,6 +200,7 @@ struct zDCQP_responder {
 struct zPD {
     vector<ibv_pd*> m_pds;
     unordered_map<ibv_mr*, vector<ibv_mr*>> m_mrs;
+    unordered_map<uint32_t, vector<uint32_t>> m_lkey_table;
     vector<vector<zDCQP_requestor*> > m_requestors;   
     vector<vector<zDCQP_responder*> > m_responders;
 };
@@ -279,8 +280,6 @@ typedef unordered_map<uint32_t, vector<uint32_t>> rkeyTable;
 struct zEndpoint
 {
     vector<zDevice*> m_devices;
-    // vector<vector<zDCQP_requestor*> > m_requestors;
-    // vector<vector<zDCQP_responder*> > m_responders;
     int m_device_num;
     int m_node_id;
 };
@@ -378,6 +377,8 @@ int worker_write(ibv_qp *qp, ibv_cq *cq, uint64_t local_addr, uint32_t lkey, uin
 int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
 
 int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
+
+int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey);
 
 int load_config(const char* fname, struct zDeviceConfig* config);
 

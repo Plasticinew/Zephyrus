@@ -207,7 +207,7 @@ void zQP_flush(qp_info_table* qp_info) {
                 }
             }
         }
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -665,6 +665,11 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
         for(int i = 0; i < MAX_NIC_NUM; i ++) {
             qp->remote_atomic_table_rkey[i] = server_pdata.atomic_table_rkey[i];
         }
+        for(int i = 0; i < MAX_NIC_NUM; i++){
+            if(qp->m_rkey_table->find(qp->remote_atomic_table_rkey[0]) == qp->m_rkey_table->end())
+                (*qp->m_rkey_table)[qp->remote_atomic_table_rkey[0]] = std::vector<uint32_t>();
+            qp->m_rkey_table->at(qp->remote_atomic_table_rkey[0]).push_back(qp->remote_atomic_table_rkey[i]);
+        }
     }
     else if(qp->remote_atomic_table_addr != server_pdata.atomic_table_addr) {
         std::cerr << "Error, atomic table address mismatch" << std::endl;
@@ -674,6 +679,11 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
         qp->remote_qp_info_addr = server_pdata.qp_info_addr;
         for(int i = 0; i < MAX_NIC_NUM ; i ++) {
             qp->remote_qp_info_rkey[i] = server_pdata.qp_info_rkey[i];
+        }
+        for(int i = 0; i < MAX_NIC_NUM; i++){
+            if(qp->m_rkey_table->find(qp->remote_qp_info_rkey[0]) == qp->m_rkey_table->end())
+                (*qp->m_rkey_table)[qp->remote_qp_info_rkey[0]] = std::vector<uint32_t>();
+            qp->m_rkey_table->at(qp->remote_qp_info_rkey[0]).push_back(qp->remote_qp_info_rkey[i]);
         }
     }
     else if(qp->remote_qp_info_addr != server_pdata.qp_info_addr) {
@@ -1156,6 +1166,10 @@ int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* rem
     }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
+        if(qp->current_device != 0){
+            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+        }
         int result = zQP_write(qp, local_addr, lkey, length, remote_addr, rkey, qp->time_stamp, true);
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1186,6 +1200,10 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
     }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
+        if(qp->current_device != 0){
+            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+        }
         int result = zQP_read(qp, local_addr, lkey, length, remote_addr, rkey, qp->time_stamp);
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1216,6 +1234,10 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
     }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
+        if(qp->current_device != 0){
+            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+        }
         bool result = zQP_CAS(qp, local_addr, lkey, new_val, remote_addr, rkey, qp->time_stamp);
         if (result == -1){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1243,7 +1265,7 @@ int z_recovery(zQP *qp) {
     zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // read recovery log
-    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[qp->current_device]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[qp->current_device]);
+    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
     zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
     int start = qp->entry_start_;
     int end = qp->entry_end_;
@@ -1311,9 +1333,11 @@ ibv_mr* mr_malloc_create(zPD* pd, uint64_t &addr, size_t length) {
     addr = (uint64_t)mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE |MAP_ANONYMOUS, -1, 0);
     ibv_mr* primary_mr = mr_create(pd->m_pds[0], (void*)addr, length);
     pd->m_mrs[primary_mr].push_back(primary_mr);
+    pd->m_lkey_table[primary_mr->lkey].push_back(primary_mr->lkey);
     for (int i = 1; i < pd->m_pds.size(); i++) {
         ibv_mr* mr = mr_create(pd->m_pds[i], (void*)addr, length);
         pd->m_mrs[primary_mr].push_back(mr);
+        pd->m_lkey_table[primary_mr->lkey].push_back(mr->lkey);
     }
     return primary_mr;
 }
