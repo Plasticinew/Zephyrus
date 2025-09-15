@@ -203,10 +203,11 @@ void zQP_flush(qp_info_table* qp_info) {
                     }
                     *(volatile uint64_t*)target_addr = atomic_buffer[j].buffer;
                     atomic_buffer[j].finished = 1;
+                    printf("flush qp %d entry %d: buffer=%lu\n", i, j, atomic_buffer[j].buffer);
                 }
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -964,7 +965,8 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
         printf("CAS failed, expect %lu, get %lu\n", expected, *((uint64_t*)local_addr));
         return 0;
     }
-    zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
+    // zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
+    usleep(10000);
     delete entry;
     delete buffer;
     delete buffer_sge;
@@ -1428,7 +1430,12 @@ void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint
 
 int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_type, int node_id) {
     zQP_responder *qp_instance = zqp->listeners[nic_index];
-    int id = zqp->qp_num_.fetch_add(1);
+    
+    int id = node_id; 
+    if(id == 0) {
+        id = zqp->qp_num_.fetch_add(1);
+    }
+
     zQP_responder_connection *conn = new zQP_responder_connection();
     conn->cm_id_ = cm_id;
 
@@ -1471,18 +1478,16 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     //     memset(zqp->qp_log_[node_id], 0, sizeof(CmdMsgBlock));
     //     zqp->qp_log_list_[node_id] = mr_create(zqp->m_pd->m_pds[nic_index], (void *)zqp->qp_log_[node_id], sizeof(CmdMsgBlock));
     // }
-    if(zqp->qp_info[node_id].addr == 0) {
-        ibv_mr* mr = mr_malloc_create(zqp->m_pd, zqp->qp_info[node_id].addr, sizeof(zAtomic_buffer)*WR_ENTRY_NUM);
+    rep_pdata.qp_id = id;
+    
+    if(zqp->qp_info[id].addr == 0) {
+        ibv_mr* mr = mr_malloc_create(zqp->m_pd, zqp->qp_info[id].addr, sizeof(zAtomic_buffer)*WR_ENTRY_NUM);
         for(int i = 0; i < zqp->m_pd->m_mrs[mr].size(); i++){
-            zqp->qp_info[node_id].rkey[i] = zqp->m_pd->m_mrs[mr][i]->rkey;
+            zqp->qp_info[id].rkey[i] = zqp->m_pd->m_mrs[mr][i]->rkey;
         }
     }
     // rep_pdata.id = -1;
-    if(node_id == 0) {
-        rep_pdata.qp_id = id;
-    } else {
-        rep_pdata.qp_id = node_id;
-    }
+
     rep_pdata.conn_id = -1;
     if(qp_type == ZQP_RPC){
         int num = qp_instance->worker_num_;
@@ -1515,8 +1520,8 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     else{
         // rep_pdata.buf_addr = (uintptr_t)zqp->qp_log_[node_id];
         // rep_pdata.buf_rkey = zqp->qp_log_list_[node_id]->rkey;
-        rep_pdata.buf_addr = zqp->qp_info[node_id].addr;
-        rep_pdata.buf_rkey = zqp->qp_info[node_id].rkey[nic_index];
+        rep_pdata.buf_addr = zqp->qp_info[id].addr;
+        rep_pdata.buf_rkey = zqp->qp_info[id].rkey[nic_index];
     }
     rep_pdata.size = sizeof(CmdMsgRespBlock);
     rep_pdata.nic_num_ = zqp->m_pd->m_responders.size();
@@ -1524,9 +1529,9 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     for(int i = 0; i < MAX_NIC_NUM; i++){
         rep_pdata.qp_info_rkey[i] = zqp->qp_info_rkey[i];
     }
-    rep_pdata.atomic_table_addr = (uint64_t)(zqp->qp_info[node_id].addr);
+    rep_pdata.atomic_table_addr = (uint64_t)(zqp->qp_info[id].addr);
     for(int i = 0; i < MAX_NIC_NUM; i++){
-        rep_pdata.atomic_table_rkey[i] = zqp->qp_info[node_id].rkey[i];
+        rep_pdata.atomic_table_rkey[i] = zqp->qp_info[id].rkey[i];
     }
     for(int i = 0; i < rep_pdata.nic_num_; i++){
         rep_pdata.gid1[i] = zqp->m_pd->m_responders[i][0]->gid1;
