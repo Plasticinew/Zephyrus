@@ -99,7 +99,7 @@ struct CNodeInit{
 
 struct PData {
     uint64_t buf_addr;
-    uint32_t buf_rkey;
+    uint32_t buf_rkey[MAX_NIC_NUM];
     uint16_t qp_id;
     uint16_t conn_id;
     uint32_t size;
@@ -243,7 +243,7 @@ struct zQP_requestor
     struct ibv_mr *msg_mr_;
     struct ibv_mr *resp_mr_;
     uint64_t server_cmd_msg_;
-    uint32_t server_cmd_rkey_;
+    uint32_t server_cmd_rkey_[MAX_NIC_NUM];
     uint64_t gid1, gid2, interface, subnet;
     uint16_t lid_;
     uint32_t dct_num_;

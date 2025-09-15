@@ -623,7 +623,10 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
     memcpy(&server_pdata, event->param.conn.private_data, sizeof(server_pdata));
 
     qp_instance->server_cmd_msg_ = server_pdata.buf_addr;
-    qp_instance->server_cmd_rkey_ = server_pdata.buf_rkey;
+    for(int i = 0; i < MAX_NIC_NUM; i ++) {
+        qp_instance->server_cmd_rkey_[i] = server_pdata.buf_rkey[i];
+    }
+    // qp_instance->server_cmd_rkey_ = server_pdata.buf_rkey;
     qp_instance->conn_id_ = server_pdata.conn_id;
     qp_instance->qp_id_ = server_pdata.qp_id;
     if(qp->qp_id_ == 0){
@@ -797,7 +800,7 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
         log_wr->opcode = IBV_WR_RDMA_WRITE;
         log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
         log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + zqp->entry_end_ * sizeof(zWR_entry);
-        log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_;
+        log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     }        
 
     sge->addr = (uint64_t)local_addr;
@@ -913,7 +916,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     buffer_wr->opcode = IBV_WR_RDMA_WRITE;
     buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
     buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + zqp->entry_end_ * sizeof(zAtomic_buffer);
-    buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_;
+    buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     send_wr->next = buffer_wr;
 
     ibv_qp* qp = requestor->qp_;
@@ -1018,7 +1021,7 @@ int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, 
     buffer_wr->opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
     buffer_wr->send_flags = IBV_SEND_SIGNALED;
     buffer_wr->wr.atomic.remote_addr = requestor->server_cmd_msg_ + entry->offset * sizeof(zAtomic_buffer) + sizeof(uint64_t);
-    buffer_wr->wr.atomic.rkey = requestor->server_cmd_rkey_;
+    buffer_wr->wr.atomic.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     buffer_wr->wr.atomic.compare_add = old_val;
     buffer_wr->wr.atomic.swap = check_val;
     send_wr->next = buffer_wr;
@@ -1115,7 +1118,7 @@ void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size){
 
     /* send a request to sever */
     qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
-    zQP_write(qp, (void *)requestor->cmd_msg_, requestor->msg_mr_->lkey, sizeof(CmdMsgBlock), (void*)requestor->server_cmd_msg_, requestor->server_cmd_rkey_, qp->time_stamp, false);
+    zQP_write(qp, (void *)requestor->cmd_msg_, requestor->msg_mr_->lkey, sizeof(CmdMsgBlock), (void*)requestor->server_cmd_msg_, requestor->server_cmd_rkey_[qp->current_device], qp->time_stamp, false);
 
     /* wait for response */
     auto start = TIME_NOW;
@@ -1143,7 +1146,6 @@ void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size){
 int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey) {
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
-        qp->time_stamp = 0;
         std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
@@ -1174,7 +1176,6 @@ int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* rem
 int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey){
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
-        qp->time_stamp = 0;
         std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
@@ -1205,7 +1206,6 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
 int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey) {
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
-        qp->time_stamp = 0;
         std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
@@ -1238,9 +1238,11 @@ int z_recovery(zQP *qp) {
     if(qp->qp_type == ZQP_RPC){
         return 0;
     }
+    int recovery_device = qp->current_device;
+    qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
     new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // read recovery log
-    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[qp->current_device]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[qp->current_device]->server_cmd_msg_, qp->m_requestors[qp->current_device]->server_cmd_rkey_);
+    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[qp->current_device]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[qp->current_device]);
     zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
     int start = qp->entry_start_;
     int end = qp->entry_end_;
@@ -1516,13 +1518,18 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     } 
     if(qp_type == ZQP_RPC){
         rep_pdata.buf_addr = (uintptr_t)cmd_msg;
-        rep_pdata.buf_rkey = msg_mr->rkey;
+        for(int i = 0; i < MAX_NIC_NUM; i++){
+            rep_pdata.buf_rkey[i] = msg_mr->rkey;
+        }
     }
     else{
         // rep_pdata.buf_addr = (uintptr_t)zqp->qp_log_[node_id];
         // rep_pdata.buf_rkey = zqp->qp_log_list_[node_id]->rkey;
         rep_pdata.buf_addr = zqp->qp_info[id].addr;
-        rep_pdata.buf_rkey = zqp->qp_info[id].rkey[nic_index];
+        for(int i = 0; i < MAX_NIC_NUM; i++){
+            rep_pdata.buf_rkey[i] = zqp->qp_info[id].rkey[i];
+        }
+        // rep_pdata.buf_rkey = zqp->qp_info[id].rkey[nic_index];
     }
     rep_pdata.size = sizeof(CmdMsgRespBlock);
     rep_pdata.nic_num_ = zqp->m_pd->m_responders.size();
