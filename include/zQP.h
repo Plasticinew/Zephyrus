@@ -225,8 +225,8 @@ struct zAtomic_entry {
 struct zAtomic_buffer{
     uint64_t buffer;
     uint64_t target_addr:48;
-    uint64_t time_stamp:15;
-    uint64_t finished:1;
+    uint64_t time_stamp:14;
+    uint64_t finished:2;
 };
 
 
@@ -349,6 +349,8 @@ int zDCQP_read(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_
 
 int zDCQP_write(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
 
+int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
+
 int z_recovery(zQP *qp);
 
 zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd);
@@ -365,9 +367,9 @@ int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* r
 
 int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log);
 
-bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
 
-bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, zAtomic_entry* entry);
+int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, zAtomic_entry* entry);
 
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
 

@@ -194,8 +194,13 @@ void zQP_flush(qp_info_table* qp_info) {
             }
             zAtomic_buffer* atomic_buffer = (zAtomic_buffer*)qp_info[i].addr;
             for(int j = 0; j < WR_ENTRY_NUM; j ++) {
-                if(atomic_buffer[j].finished == 0) {
+                if(atomic_buffer[j].target_addr != 0 && atomic_buffer[j].finished == 0) {
                     uint64_t target_addr = atomic_buffer[j].target_addr;
+                    zAtomic_entry entry = *(zAtomic_entry*)(uintptr_t)target_addr;
+                    if(entry.offset != j || entry.qp_id != i) {
+                        atomic_buffer[j].finished = 2;
+                        continue;
+                    }
                     *(volatile uint64_t*)target_addr = atomic_buffer[j].buffer;
                     atomic_buffer[j].finished = 1;
                 }
@@ -500,6 +505,33 @@ int zDCQP_write(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32
     return 0;
 }
 
+int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num){
+    uint64_t expected = *(uint64_t*)local_addr;
+    ibv_wr_start(requestor->qp_ex_);
+    requestor->qp_ex_->wr_id = 0;
+    requestor->qp_ex_->wr_flags = IBV_SEND_SIGNALED;
+    ibv_wr_atomic_cmp_swp(requestor->qp_ex_, rkey, (uint64_t)remote_addr, expected, new_val);
+    ibv_wr_set_sge(requestor->qp_ex_, lkey, (uint64_t)local_addr, length);
+    mlx5dv_wr_set_dc_addr(requestor->qp_mlx_ex_, ah, dct_num, 114514);
+    ibv_wr_complete(requestor->qp_ex_);
+    auto start = TIME_NOW;
+    struct ibv_wc wc;
+    while(true) {
+        if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
+            std::cerr << "Error, read timeout" << std::endl;
+            break;
+        }
+        if(ibv_poll_cq(requestor->cq_, 1, &wc) > 0) {
+            if(wc.status != IBV_WC_SUCCESS) {
+                std::cerr << "Error, read failed: " << wc.status << std::endl;
+                break;
+            }
+            break;        
+        }
+    }
+    return 0;
+}
+
 int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
     if (qp->m_requestors.find(nic_index) != qp->m_requestors.end() && qp->m_requestors[nic_index]->status_ == ZSTATUS_CONNECTED){
         return -1;
@@ -709,12 +741,12 @@ int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* r
     while(true) {
         if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
             std::cerr << "Error, read timeout" << std::endl;
-            break;
+            return -1;
         }
         if(ibv_poll_cq(cq, 1, &wc) > 0) {
             if(wc.status != IBV_WC_SUCCESS) {
                 std::cerr << "Error, read failed: " << wc.status << std::endl;
-                break;
+                return -1;
             }
             int start_ = zqp->entry_start_;
             int end_ = zqp->entry_end_;
@@ -798,13 +830,13 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
     ibv_cq* cq = requestor->cq_;
     while(true) {
         if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
-            // std::cerr << "Error, write timeout" << std::endl;
-            break;
+            std::cerr << "Error, write timeout" << std::endl;
+            return -1;
         }
         if(ibv_poll_cq(cq, 1, &wc) > 0) {
             if(wc.status != IBV_WC_SUCCESS) {
                 std::cerr << "Error, write failed: " << wc.status << std::endl;
-                break;
+                return -1;
             }
             int start_ = zqp->entry_start_;
             int end_ = zqp->entry_end_;
@@ -834,14 +866,15 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
     return 0;
 }
 
-bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp) {
+int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp) {
     zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
-    
+    uint64_t expected = *(uint64_t*)local_addr;
+
     struct ibv_sge *sge = new ibv_sge();
-    sge->addr = (uint64_t)requestor->cmd_resp_;
+    sge->addr = (uint64_t)local_addr;
     sge->length = sizeof(uint64_t);
-    sge->lkey = requestor->resp_mr_->lkey;
-    
+    sge->lkey = lkey;
+
     zAtomic_entry *entry = new zAtomic_entry();
     entry->time_stamp = time_stamp;
     entry->qp_id = zqp->qp_id_;
@@ -857,9 +890,9 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
     send_wr->send_flags = IBV_SEND_SIGNALED;
     send_wr->wr.atomic.remote_addr = (uint64_t)remote_addr;
     send_wr->wr.atomic.rkey = rkey;
-    send_wr->wr.atomic.compare_add = *compare;
+    send_wr->wr.atomic.compare_add = expected;
     send_wr->wr.atomic.swap = *(uint64_t*)entry;
-    printf("CAS: %lu --> %lu\n", *compare, *(uint64_t*)entry);
+    printf("CAS: %lu --> %lu\n", expected, *(uint64_t*)entry);
 
     struct ibv_sge *buffer_sge = new ibv_sge();
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
@@ -899,13 +932,13 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
     ibv_cq* cq = requestor->cq_;
     while(true) {
         if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
-            std::cerr << "Error, read timeout" << std::endl;
-            break;
+            std::cerr << "Error, CAS timeout" << std::endl;
+            return -1;
         }
         if(ibv_poll_cq(cq, 1, &wc) > 0) {
             if(wc.status != IBV_WC_SUCCESS) {
-                std::cerr << "Error, read failed: " << wc.status << std::endl;
-                break;
+                std::cerr << "Error, CAS failed: " << wc.status << std::endl;
+                return -1;
             }
             int start_ = zqp->entry_start_;
             int end_ = zqp->entry_end_;
@@ -927,20 +960,19 @@ bool zQP_CAS(zQP *zqp, uint64_t *compare, uint64_t new_val, void* remote_addr, u
             break;
         }
     }
-    if(*compare != *((uint64_t*)requestor->cmd_resp_)){
-        printf("CAS failed, expect %lu, get %lu\n", *compare, *((uint64_t*)requestor->cmd_resp_));
-        *compare = *((uint64_t*)requestor->cmd_resp_);
-        return false;
+    if(expected != *((uint64_t*)local_addr)){
+        printf("CAS failed, expect %lu, get %lu\n", expected, *((uint64_t*)local_addr));
+        return 0;
     }
     zQP_CAS_step2(zqp, new_val, remote_addr, rkey, time_stamp, entry);
     delete entry;
     delete buffer;
     delete buffer_sge;
     delete buffer_wr;
-    return true;
+    return 0;
 }
 
-bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, zAtomic_entry* entry) {
+int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, zAtomic_entry* entry) {
     zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
     
     struct ibv_sge *sge = new ibv_sge();
@@ -1000,13 +1032,13 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
     ibv_cq* cq = requestor->cq_;
     while(true) {
         if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
-            std::cerr << "Error, read timeout" << std::endl;
-            break;
+            std::cerr << "Error, CAS timeout" << std::endl;
+            return -1;
         }
         if(ibv_poll_cq(cq, 1, &wc) > 0) {
             if(wc.status != IBV_WC_SUCCESS) {
-                std::cerr << "Error, read failed: " << wc.status << std::endl;
-                break;
+                std::cerr << "Error, CAS failed: " << wc.status << std::endl;
+                return -1;
             }
             break;
         }
@@ -1017,7 +1049,7 @@ bool zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey,
     if(old_val != *((uint64_t*)(requestor->cmd_resp_)+1)){
         printf("Error, atomic write failed, expect %lu, get %lu\n", old_val, *((uint64_t*)(requestor->cmd_resp_)+1));
     }
-    return true;
+    return 0;
 }
 
 int zQP_send_wr(zQP* zqp, ibv_send_wr* send_wr){
@@ -1168,6 +1200,37 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
     }
 }
 
+int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey) {
+    if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
+        qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
+        qp->time_stamp = 0;
+        std::cerr << "Warning, switch to device " << qp->current_device << std::endl;
+        int result = z_recovery(qp);
+        if (result != 0) {
+            std::cerr << "Error, recovery failed" << std::endl;
+            return -1;
+        }
+        return zDCQP_CAS(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
+    }
+    if(qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
+        qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
+        bool result = zQP_CAS(qp, local_addr, lkey, new_val, remote_addr, rkey, qp->time_stamp);
+        if (result == -1){
+            qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
+            qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
+            std::cerr << "Error, connection lost, start recovery" << std::endl;
+            int res = z_recovery(qp);
+            if (res != 0) {
+                std::cerr << "Error, recovery failed" << std::endl;
+            }
+            return 0;
+        }
+        return 0;
+    } else{
+        return zDCQP_CAS(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
+    }
+}
+
 int z_recovery(zQP *qp) {
     if(qp->qp_type == ZQP_RPC){
         return 0;
@@ -1192,21 +1255,18 @@ int z_recovery(zQP *qp) {
                 int remote_time = buffer->time_stamp;
                 if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
                     // resend CAS
-                    zQP_CAS(qp, (uint64_t*)&send_wr->wr.atomic.compare_add, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey, qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp);
+                    zQP_CAS(qp, (uint64_t*)&send_wr->wr.atomic.compare_add, send_wr->sg_list->lkey, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey, qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp);
                     continue;
                 }
                 if(buffer->finished == 1) {
-                    int return_val = send_wr->wr.atomic.compare_add;
                     continue;
                 }
                 int new_val = qp->wr_entry_[i%WR_ENTRY_NUM].reserved;
                 z_read(qp, (void*)&entry[i%WR_ENTRY_NUM].reserved, qp->resp_mr_[qp->current_device]->lkey, sizeof(uint64_t), (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
                 if(entry[i%WR_ENTRY_NUM].reserved == send_wr->wr.atomic.swap){
-                    // TODO: try CAS_step 2?
                     continue;    
                 } else {
-                    // send but failed
-                    int return_val = entry[i%WR_ENTRY_NUM].reserved;
+                    *(uint64_t*)send_wr->sg_list->addr = entry[i%WR_ENTRY_NUM].reserved;
                 }
             } else {
                 int local_time = qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp;

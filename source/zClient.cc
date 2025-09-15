@@ -50,7 +50,7 @@ void test_zQP(string config_file, string remote_config_file) {
             }
         }
         for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
-            zQP_CAS(qps[i], ((uint64_t*)local_buf)+j, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, 0);
+            zQP_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, 0);
         }
         memset(local_buf, 0, alloc_size);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
