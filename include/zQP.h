@@ -300,11 +300,12 @@ struct zQP_listener {
     zPD *m_pd;
     zEndpoint *m_ep;
     unordered_map<int, zQP_responder*> listeners;
-    atomic<int> qp_num_ = 1;
+    atomic<uint64_t> qp_num_ = 1;
     // CmdMsgBlock* qp_log_[MAX_QP_NUM];
     // struct ibv_mr* qp_log_list_[MAX_QP_NUM];
     qp_info_table* qp_info;
     uint32_t qp_info_rkey[MAX_NIC_NUM];
+    thread *flush_thread_;
 };
 
 struct zQP
@@ -337,6 +338,8 @@ zEndpoint* zEP_create(string config_file);
 zPD* zPD_create(zEndpoint *ep, int pool_size);
 
 zQP* zQP_create(zPD* pd, zEndpoint *ep, rkeyTable* table, zQPType qp_type);
+
+void zQP_flush(qp_info_table* qp_info);
 
 zQP_listener* zQP_listener_create(zPD* pd, zEndpoint *ep);
 

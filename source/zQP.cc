@@ -182,7 +182,27 @@ zQP_listener* zQP_listener_create(zPD* pd, zEndpoint *ep) {
         }
         listener->qp_info_rkey[i] = pd->m_mrs[mr][i]->rkey;
     }
+    listener->flush_thread_ = new std::thread(zQP_flush, listener->qp_info);
     return listener;
+}
+
+void zQP_flush(qp_info_table* qp_info) {
+    while(true) {
+        for(int i = 0; i < MAX_QP_NUM; i ++) {
+            if (qp_info[i].addr == 0){
+                continue;
+            }
+            zAtomic_buffer* atomic_buffer = (zAtomic_buffer*)qp_info[i].addr;
+            for(int j = 0; j < WR_ENTRY_NUM; j ++) {
+                if(atomic_buffer[j].finished == 0) {
+                    uint64_t target_addr = atomic_buffer[j].target_addr;
+                    *(volatile uint64_t*)target_addr = atomic_buffer[j].buffer;
+                    atomic_buffer[j].finished = 1;
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 }
 
 zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd) { 
@@ -1345,7 +1365,6 @@ void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint
         }
     } 
 }
-
 
 int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_type, int node_id) {
     zQP_responder *qp_instance = zqp->listeners[nic_index];
