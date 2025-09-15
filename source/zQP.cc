@@ -893,7 +893,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     send_wr->wr.atomic.rkey = rkey;
     send_wr->wr.atomic.compare_add = expected;
     send_wr->wr.atomic.swap = *(uint64_t*)entry;
-    printf("CAS: %lu --> %lu\n", expected, *(uint64_t*)entry);
+    // printf("CAS: %lu --> %lu\n", expected, *(uint64_t*)entry);
 
     struct ibv_sge *buffer_sge = new ibv_sge();
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
@@ -994,7 +994,7 @@ int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, 
     send_wr->wr.atomic.rkey = rkey;
     send_wr->wr.atomic.compare_add = *(uint64_t*)entry;
     send_wr->wr.atomic.swap = new_val;
-    printf("CAS: %lu --> %lu\n", *(uint64_t*)entry, new_val);
+    // printf("CAS: %lu --> %lu\n", *(uint64_t*)entry, new_val);
 
     struct ibv_sge *buffer_sge = new ibv_sge();
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
@@ -1006,7 +1006,7 @@ int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, 
     uint64_t old_val = *((uint64_t*)(buffer)+1);
     buffer->finished = 1;
     uint64_t check_val = *((uint64_t*)(buffer)+1);
-    printf("old: %lu, check: %lu\n", old_val, check_val);
+    // printf("old: %lu, check: %lu\n", old_val, check_val);
 
     buffer_sge->addr = (uint64_t)((uint64_t*)(requestor->cmd_resp_)+1);
     buffer_sge->length = sizeof(uint64_t);
@@ -1144,10 +1144,10 @@ int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* rem
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
         qp->time_stamp = 0;
-        std::cerr << "Warning, switch to device " << qp->current_device << std::endl;
+        std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
-            std::cerr << "Error, recovery failed" << std::endl;
+            std::cout << "Error, recovery failed" << std::endl;
             return -1;
         }
         return zDCQP_write(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
@@ -1158,10 +1158,10 @@ int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* rem
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
-            std::cerr << "Error, connection lost, start recovery" << std::endl;
+            std::cout << "Error, connection lost, start recovery" << std::endl;
             result = z_recovery(qp);
             if (result != 0) {
-                std::cerr << "Error, recovery failed" << std::endl;
+                std::cout << "Error, recovery failed" << std::endl;
             }
             return 0;
         }
@@ -1175,10 +1175,10 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
         qp->time_stamp = 0;
-        std::cerr << "Warning, switch to device " << qp->current_device << std::endl;
+        std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
-            std::cerr << "Error, recovery failed" << std::endl;
+            std::cout << "Error, recovery failed" << std::endl;
             return -1;
         }
         return zDCQP_read(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
@@ -1189,10 +1189,10 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
-            std::cerr << "Error, connection lost, start recovery" << std::endl;
+            std::cout << "Error, connection lost, start recovery" << std::endl;
             result = z_recovery(qp);
             if (result != 0) {
-                std::cerr << "Error, recovery failed" << std::endl;
+                std::cout << "Error, recovery failed" << std::endl;
             }
             return 0;
         }
@@ -1206,10 +1206,10 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
         qp->time_stamp = 0;
-        std::cerr << "Warning, switch to device " << qp->current_device << std::endl;
+        std::cout << "Warning, switch to device " << qp->current_device << std::endl;
         int result = z_recovery(qp);
         if (result != 0) {
-            std::cerr << "Error, recovery failed" << std::endl;
+            std::cout << "Error, recovery failed" << std::endl;
             return -1;
         }
         return zDCQP_CAS(qp->m_ep->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
@@ -1220,10 +1220,10 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
         if (result == -1){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
-            std::cerr << "Error, connection lost, start recovery" << std::endl;
+            std::cout << "Error, connection lost, start recovery" << std::endl;
             int res = z_recovery(qp);
             if (res != 0) {
-                std::cerr << "Error, recovery failed" << std::endl;
+                std::cout << "Error, recovery failed" << std::endl;
             }
             return 0;
         }
@@ -1234,6 +1234,7 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
 }
 
 int z_recovery(zQP *qp) {
+    printf("Start recovery on device %d\n", qp->current_device);
     if(qp->qp_type == ZQP_RPC){
         return 0;
     }
