@@ -279,8 +279,8 @@ typedef unordered_map<uint32_t, vector<uint32_t>> rkeyTable;
 struct zEndpoint
 {
     vector<zDevice*> m_devices;
-    vector<vector<zDCQP_requestor*> > m_requestors;
-    vector<vector<zDCQP_responder*> > m_responders;
+    // vector<vector<zDCQP_requestor*> > m_requestors;
+    // vector<vector<zDCQP_responder*> > m_responders;
     int m_device_num;
     int m_node_id;
 };
