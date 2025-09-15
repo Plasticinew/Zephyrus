@@ -40,12 +40,14 @@ void test_zQP(string config_file, string remote_config_file) {
             printf("%u ", rk);
         }
         memset(local_buf, 1, alloc_size);
-        system("sudo ip link set ens1f0 down");
+        std::thread t(system, "sudo ip link set ens1f0 down");
+        // system("sudo ip link set ens1f0 down");
         // system("sudo ip link set ens1f1 down");
-        for(int j = 0; j < 1000; j++){
+        usleep(3000);
+        for(int j = 0; j < 100000; j++){
             z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         }
-
+        t.join();
         z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);

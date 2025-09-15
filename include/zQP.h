@@ -27,7 +27,7 @@ namespace Zephyrus {
 
 #define NOTIFY_WORK 0xFF
 #define NOTIFY_IDLE 0x00
-#define MAX_MSG_SIZE 1024
+#define MAX_MSG_SIZE 16384
 #define MAX_SERVER_WORKER 1
 #define MAX_SERVER_CLIENT 4096
 #define RESOLVE_TIMEOUT_MS 5000
@@ -206,10 +206,10 @@ struct zPD {
 };
 
 struct zWR_entry {
-    uint64_t wr_addr:48;
-    uint64_t time_stamp:15;
-    uint64_t finished:1;
     uint64_t reserved;
+    uint64_t wr_addr:48;
+    uint64_t time_stamp:14;
+    uint64_t finished:2;
 };
 
 struct qp_info_table {

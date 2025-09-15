@@ -836,7 +836,10 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
         perror("Error, ibv_post_send failed");
     }
 
-    zqp->wr_entry_[zqp->entry_end_] = *entry;
+    // zqp->wr_entry_[zqp->entry_end_] = *entry;
+    zqp->wr_entry_[zqp->entry_end_].time_stamp = entry->time_stamp;
+    zqp->wr_entry_[zqp->entry_end_].wr_addr = entry->wr_addr;
+    zqp->wr_entry_[zqp->entry_end_].finished = entry->finished;
     zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
 
     auto start = TIME_NOW;
@@ -1269,6 +1272,9 @@ int z_recovery(zQP *qp) {
     zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
     int start = qp->entry_start_;
     int end = qp->entry_end_;
+    for(int i = 0; i < WR_ENTRY_NUM; i++){
+        printf("Debug: local time_stamp %d, remote time_stamp %d\n", qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp, entry[i].time_stamp);
+    }
     if(start > end)
         end += WR_ENTRY_NUM;
     if(start != end){
@@ -1309,8 +1315,10 @@ int z_recovery(zQP *qp) {
                                 send_wr = send_wr->next;
                                 continue;
                             }
+                            printf("resend loca timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                             z_write(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
                         } else if(send_wr->opcode == IBV_WR_RDMA_READ){
+                            printf("resend loca timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                             z_read(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
                         } else {
                             printf("Error, unsupported opcode %d\n", send_wr->opcode);
