@@ -506,13 +506,13 @@ int zDCQP_write(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32
     return 0;
 }
 
-int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num){
+int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num){
     uint64_t expected = *(uint64_t*)local_addr;
     ibv_wr_start(requestor->qp_ex_);
     requestor->qp_ex_->wr_id = 0;
     requestor->qp_ex_->wr_flags = IBV_SEND_SIGNALED;
     ibv_wr_atomic_cmp_swp(requestor->qp_ex_, rkey, (uint64_t)remote_addr, expected, new_val);
-    ibv_wr_set_sge(requestor->qp_ex_, lkey, (uint64_t)local_addr, length);
+    ibv_wr_set_sge(requestor->qp_ex_, lkey, (uint64_t)local_addr, sizeof(uint64_t));
     mlx5dv_wr_set_dc_addr(requestor->qp_mlx_ex_, ah, dct_num, 114514);
     ibv_wr_complete(requestor->qp_ex_);
     auto start = TIME_NOW;
@@ -1061,12 +1061,12 @@ int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, 
             break;
         }
     }
-    if(*(uint64_t*)entry != *((uint64_t*)requestor->cmd_resp_)){
-        printf("CAS failed, expect %lu, get %lu\n", *(uint64_t*)entry, *((uint64_t*)requestor->cmd_resp_));
-    }
-    if(old_val != *((uint64_t*)(requestor->cmd_resp_)+1)){
-        printf("Error, atomic write failed, expect %lu, get %lu\n", old_val, *((uint64_t*)(requestor->cmd_resp_)+1));
-    }
+    // if(*(uint64_t*)entry != *((uint64_t*)requestor->cmd_resp_)){
+    //     printf("CAS failed, expect %lu, get %lu\n", *(uint64_t*)entry, *((uint64_t*)requestor->cmd_resp_));
+    // }
+    // if(old_val != *((uint64_t*)(requestor->cmd_resp_)+1)){
+    //     printf("Error, atomic write failed, expect %lu, get %lu\n", old_val, *((uint64_t*)(requestor->cmd_resp_)+1));
+    // }
     return 0;
 }
 
@@ -1224,7 +1224,7 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
     }
 }
 
-int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey) {
+int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey) {
     if(qp->m_ep->m_devices[qp->current_device]->status == ZSTATUS_ERROR) {
         qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
         std::cout << "Warning, switch to device " << qp->current_device << std::endl;
@@ -1233,7 +1233,7 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
             std::cout << "Error, recovery failed" << std::endl;
             return -1;
         }
-        return zDCQP_CAS(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
+        return zDCQP_CAS(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
     }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
@@ -1241,7 +1241,7 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
             lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
             rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
         }
-        bool result = zQP_CAS(qp, local_addr, lkey, new_val, remote_addr, rkey, qp->time_stamp);
+        int result = zQP_CAS(qp, local_addr, lkey, new_val, remote_addr, rkey, qp->time_stamp);
         if (result == -1){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
@@ -1254,7 +1254,36 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t l
         }
         return 0;
     } else{
-        return zDCQP_CAS(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
+        return zDCQP_CAS(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
+    }
+}
+
+int z_post_send(zQP* qp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent) {
+    ibv_send_wr* copy_wr = new ibv_send_wr();
+    ibv_send_wr* p = send_wr;
+    ibv_send_wr* q = copy_wr;
+    bool retry = false;
+    // deep copy
+    while(p != NULL) {
+        memcpy(q, p, sizeof(ibv_send_wr));
+        ibv_sge *sge = new ibv_sge();
+        if(p->sg_list != NULL) {
+            memcpy(sge, p->sg_list, sizeof(ibv_sge));
+        } else {
+            sge = NULL;
+        }
+        q->sg_list = sge;
+        if(p->opcode == IBV_WR_SEND || p->opcode == IBV_WR_RDMA_WRITE || 
+            p->opcode == IBV_WR_RDMA_WRITE_WITH_IMM || p->opcode == IBV_WR_ATOMIC_CMP_AND_SWP) {
+            retry = true;
+        }
+        p = p->next; 
+        if(p != NULL) {
+            q->next = new ibv_send_wr();
+            q = q->next;
+        } else {
+            q->next = NULL;
+        }
     }
 }
 
@@ -1272,9 +1301,9 @@ int z_recovery(zQP *qp) {
     zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
     int start = qp->entry_start_;
     int end = qp->entry_end_;
-    for(int i = 0; i < WR_ENTRY_NUM; i++){
-        printf("Debug: local time_stamp %d, remote time_stamp %d\n", qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp, entry[i].time_stamp);
-    }
+    // for(int i = 0; i < WR_ENTRY_NUM; i++){
+    //     printf("Debug: local time_stamp %d, remote time_stamp %d\n", qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp, entry[i].time_stamp);
+    // }
     if(start > end)
         end += WR_ENTRY_NUM;
     if(start != end){
@@ -1289,7 +1318,8 @@ int z_recovery(zQP *qp) {
                 int remote_time = buffer->time_stamp;
                 if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
                     // resend CAS
-                    zQP_CAS(qp, (uint64_t*)&send_wr->wr.atomic.compare_add, send_wr->sg_list->lkey, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey, qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp);
+                    printf("resend loca timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
+                    z_CAS(qp, (uint64_t*)send_wr->sg_list->addr, send_wr->sg_list->lkey, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
                     continue;
                 }
                 if(buffer->finished == 1) {

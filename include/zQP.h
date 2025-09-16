@@ -348,7 +348,7 @@ int zDCQP_read(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_
 
 int zDCQP_write(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
 
-int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
+int zDCQP_CAS(zDCQP_requestor* requestor, ibv_ah* ah, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t lid, uint32_t dct_num);
 
 int z_recovery(zQP *qp);
 
@@ -378,7 +378,7 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
 
 int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
 
-int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, uint64_t length, void* remote_addr, uint32_t rkey);
+int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey);
 
 int load_config(const char* fname, struct zDeviceConfig* config);
 
