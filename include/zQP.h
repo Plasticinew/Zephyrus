@@ -282,6 +282,7 @@ struct zEndpoint
     vector<zDevice*> m_devices;
     int m_device_num;
     int m_node_id;
+    atomic<uint64_t> qp_num_ = 1;
 };
 
 struct zQP_responder
@@ -299,7 +300,6 @@ struct zQP_listener {
     zPD *m_pd;
     zEndpoint *m_ep;
     unordered_map<int, zQP_responder*> listeners;
-    atomic<uint64_t> qp_num_ = 1;
     // CmdMsgBlock* qp_log_[MAX_QP_NUM];
     // struct ibv_mr* qp_log_list_[MAX_QP_NUM];
     qp_info_table* qp_info;

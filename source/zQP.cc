@@ -83,7 +83,7 @@ zEndpoint* zEP_create(string config_file)
     load_config(config_file.c_str(), &m_config);
     endpoint->m_device_num = m_config.num_devices;
     endpoint->m_node_id = m_config.node_id;
-
+    endpoint->qp_num_.store(1);
     for (int i = 0; i < endpoint->m_device_num; i++)
     {
         zDevice *device = new zDevice();
@@ -207,7 +207,7 @@ void zQP_flush(qp_info_table* qp_info) {
                 }
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -1470,7 +1470,7 @@ int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_t
     
     int id = node_id; 
     if(id == 0) {
-        id = zqp->qp_num_.fetch_add(1);
+        id = zqp->m_ep->qp_num_.fetch_add(1);
     }
 
     zQP_responder_connection *conn = new zQP_responder_connection();
