@@ -2,7 +2,9 @@
 
 using namespace Zephyrus;
 
-void test_zQP(string config_file, string remote_config_file) {
+pthread_barrier_t barrier_start;
+
+void test_zQP(string config_file, string remote_config_file, int thread_id) {
     zEndpoint *ep = zEP_create(config_file);
     zPD *pd = zPD_create(ep, 1);
     rkeyTable *table = new rkeyTable();
@@ -18,7 +20,7 @@ void test_zQP(string config_file, string remote_config_file) {
         zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i]);
         rpc_qps.push_back(rpc_qp);
     }
-    size_t alloc_size = 1024;
+    size_t alloc_size = 1024*1024;
     for(int i = 0; i < qps.size(); i ++) {
         uint64_t addr;
         uint32_t rkey;
@@ -40,14 +42,12 @@ void test_zQP(string config_file, string remote_config_file) {
             printf("%u ", rk);
         }
         memset(local_buf, 1, alloc_size);
-        std::thread t(system, "sudo ip link set ens1f0 down");
         // system("sudo ip link set ens1f0 down");
         // system("sudo ip link set ens1f1 down");
-        usleep(3000);
-        for(int j = 0; j < 100000; j++){
-            z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        }
-        t.join();
+        // usleep(3000);
+        // for(int j = 0; j < 100000; j++){
+        //     z_write(qps[i], local_buf, mr->lkey, 8, (void*)addr, rkey);
+        // }
         z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
@@ -57,17 +57,28 @@ void test_zQP(string config_file, string remote_config_file) {
                 break;
             }
         }
-        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
-            // zQP_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, 0);
-            z_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, sizeof(uint64_t), (void*)(addr + j * sizeof(uint64_t)), rkey);
+        std::thread* t;
+        if(thread_id == 0) {
+            t = new std::thread(system, "sudo ip link set ens1f0 down");
         }
+        pthread_barrier_wait(&barrier_start);
+        // for(int k = 0; k < 1000; k ++) {
+        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+                // zQP_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, 0);
+            z_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey);
+        }
+        // }
         memset(local_buf, 0, alloc_size);
+        sleep(1);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
             if(((uint64_t*)local_buf)[j] != 2) {
                 printf("CAS Data mismatch at uint64 %d, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
                 break;
             }
+        }
+        if(thread_id == 0) {
+            t->join();
         }
     }
     printf("Test completed successfully\n");
@@ -76,12 +87,23 @@ void test_zQP(string config_file, string remote_config_file) {
 int main(int argc, char** argv) {
     system("sudo ip link set ens1f0 up");
     system("sudo ip link set ens1f1 up");
-    if(argc < 3) {
-        printf("Usage: %s <local_config_file> <remote_config_file>\n", argv[0]);
+    sleep(1);
+    if(argc < 4) {
+        printf("Usage: %s <local_config_file> <remote_config_file> <thread_num>\n", argv[0]);
         return -1;
     }
     string config_file = argv[1];
     string remote_config_file = argv[2];
-    test_zQP(config_file, remote_config_file);
+    int thread_num = atoi(argv[3]);
+    pthread_barrier_init(&barrier_start, NULL, thread_num);
+    // test_zQP(config_file, remote_config_file);
+    std::vector<std::thread*> threads;
+    for(int i = 0; i < thread_num; i ++) {
+        threads.push_back(new std::thread(test_zQP, config_file, remote_config_file, i));
+    }
+    for(int i = 0; i < thread_num; i ++) {
+        threads[i]->join();
+    }
+    pthread_barrier_destroy(&barrier_start);
     return 0;
 }
