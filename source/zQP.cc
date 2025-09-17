@@ -1167,12 +1167,12 @@ int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* rem
         }
         return zDCQP_write(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
     }
+    if(qp->current_device != 0){
+        lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+        rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+    }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
-        if(qp->current_device != 0){
-            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
-            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
-        }
         int result = zQP_write(qp, local_addr, lkey, length, remote_addr, rkey, qp->time_stamp, true);
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1201,12 +1201,12 @@ int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remo
         }
         return zDCQP_read(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, length, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
     }
+    if(qp->current_device != 0){
+        lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+        rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+    }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
-        if(qp->current_device != 0){
-            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
-            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
-        }
         int result = zQP_read(qp, local_addr, lkey, length, remote_addr, rkey, qp->time_stamp);
         if (result != 0){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1235,12 +1235,12 @@ int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, void* remo
         }
         return zDCQP_CAS(qp->m_pd->m_requestors[qp->current_device][0], qp->m_targets[qp->current_device]->ah, local_addr, lkey, new_val, remote_addr, rkey, qp->m_targets[qp->current_device]->lid_, qp->m_targets[qp->current_device]->dct_num_);
     }
+    if(qp->current_device != 0){
+        lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
+        rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
+    }
     if(qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED){
         qp->time_stamp = (qp->time_stamp+1) % MAX_REQUESTOR_NUM;
-        if(qp->current_device != 0){
-            lkey = qp->m_pd->m_lkey_table[lkey][qp->current_device];
-            rkey = qp->m_rkey_table->at(rkey)[qp->current_device];
-        }
         int result = zQP_CAS(qp, local_addr, lkey, new_val, remote_addr, rkey, qp->time_stamp);
         if (result == -1){
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -1294,8 +1294,8 @@ int z_recovery(zQP *qp) {
     }
     int recovery_device = qp->current_device;
     qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
-    zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
-    // new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
+    // zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
+    new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // read recovery log
     z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
     zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
@@ -1318,8 +1318,25 @@ int z_recovery(zQP *qp) {
                 int remote_time = buffer->time_stamp;
                 if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
                     // resend CAS
-                    printf("resend loca timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
-                    z_CAS(qp, (uint64_t*)send_wr->sg_list->addr, send_wr->sg_list->lkey, entry[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
+                    printf("qp %d resend local timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", qp->qp_id_, local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
+                    z_CAS(qp, (uint64_t*)send_wr->sg_list->addr, send_wr->sg_list->lkey, qp->wr_entry_[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
+                    int start_ = qp->entry_start_;
+                    int end_ = qp->entry_end_;
+                    if(start_ > end_)
+                        end_ += WR_ENTRY_NUM;
+                    if(start_ != end_){
+                        for(int i = start_; i < end_; i++){
+                            if(qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == local_time &&
+                                qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr){
+                                delete ((ibv_send_wr*)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr)->sg_list;
+                                delete (ibv_send_wr*)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+                                qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr = 0;
+                            }
+                            if(qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0 && i%WR_ENTRY_NUM == qp->entry_start_){
+                                qp->entry_start_ = (qp->entry_start_ + 1)%WR_ENTRY_NUM;
+                            }
+                        }
+                    }
                     continue;
                 }
                 if(buffer->finished == 1) {
@@ -1352,6 +1369,24 @@ int z_recovery(zQP *qp) {
                             z_read(qp, (void *)send_wr->sg_list->addr, send_wr->sg_list->lkey, send_wr->sg_list->length, (void *)send_wr->wr.rdma.remote_addr, send_wr->wr.rdma.rkey);
                         } else {
                             printf("Error, unsupported opcode %d\n", send_wr->opcode);
+                            continue;
+                        }
+                        int start_ = qp->entry_start_;
+                        int end_ = qp->entry_end_;
+                        if(start_ > end_)
+                            end_ += WR_ENTRY_NUM;
+                        if(start_ != end_){
+                            for(int i = start_; i < end_; i++){
+                                if(qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == local_time &&
+                                    qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr){
+                                    delete ((ibv_send_wr*)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr)->sg_list;
+                                    delete (ibv_send_wr*)qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr;
+                                    qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr = 0;
+                                }
+                                if(qp->wr_entry_[i%WR_ENTRY_NUM].wr_addr == 0 && i%WR_ENTRY_NUM == qp->entry_start_){
+                                    qp->entry_start_ = (qp->entry_start_ + 1)%WR_ENTRY_NUM;
+                                }
+                            }
                         }
                         send_wr = send_wr->next;
                     }
