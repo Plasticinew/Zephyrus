@@ -273,9 +273,9 @@ zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd) {
 
     // 状态切换为RTS
     qp_attr_to_rts.qp_state      = IBV_QPS_RTS;
-    qp_attr_to_rts.timeout       = 14;
-    qp_attr_to_rts.retry_cnt     = 10;
-    qp_attr_to_rts.rnr_retry     = 10;
+    qp_attr_to_rts.timeout       = 0;
+    qp_attr_to_rts.retry_cnt     = 7;
+    qp_attr_to_rts.rnr_retry     = 7;
     qp_attr_to_rts.sq_psn        = 114;
     qp_attr_to_rts.max_rd_atomic = 1;
 
@@ -391,7 +391,7 @@ zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd) {
     // 切换为RTR
     qp_attr.qp_state = IBV_QPS_RTR;
     qp_attr.path_mtu = IBV_MTU_4096;
-    qp_attr.min_rnr_timer = 10;
+    qp_attr.min_rnr_timer = 12;
     qp_attr.ah_attr.is_global = 1;
     qp_attr.ah_attr.grh.hop_limit = 1;
     qp_attr.ah_attr.grh.traffic_class = 0;
@@ -1297,10 +1297,13 @@ int z_recovery(zQP *qp) {
     // zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // read recovery log
-    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
-    zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
     int start = qp->entry_start_;
     int end = qp->entry_end_;
+    memset(qp->cmd_resp_, 0, sizeof(CmdMsgRespBlock));
+    z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
+   // z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
+    zWR_entry *entry = (zWR_entry *)qp->cmd_resp_;
+
     // for(int i = 0; i < WR_ENTRY_NUM; i++){
     //     printf("Debug: local time_stamp %d, remote time_stamp %d\n", qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp, entry[i].time_stamp);
     // }

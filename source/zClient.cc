@@ -20,7 +20,7 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         zQP_connect(rpc_qp, 0, config.target_ips[i], config.target_ports[i]);
         rpc_qps.push_back(rpc_qp);
     }
-    size_t alloc_size = 1024;
+    size_t alloc_size = 1024+381;
     for(int i = 0; i < qps.size(); i ++) {
         uint64_t addr;
         uint32_t rkey;
@@ -50,16 +50,17 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         // if(thread_id == 0) {
         //     t = new std::thread(system, "sudo ip link set ens1f0 down");
         // }
+        int nic_index = 0;
         for(int j = 0; j < 100000; j++){
-            zDCQP_write(qps[i]->m_pd->m_requestors[qps[i]->current_device][0], qps[i]->m_targets[qps[i]->current_device]->ah, local_buf, mr->lkey, 8, (void*)addr, rkey, qps[i]->m_targets[qps[i]->current_device]->lid_, qps[i]->m_targets[qps[i]->current_device]->dct_num_);
+            zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             // z_write(qps[i], local_buf, mr->lkey, 8, (void*)addr, rkey);
         }
-        zDCQP_write(qps[i]->m_pd->m_requestors[qps[i]->current_device][0], qps[i]->m_targets[qps[i]->current_device]->ah, local_buf, mr->lkey, alloc_size, (void*)addr, rkey, qps[i]->m_targets[qps[i]->current_device]->lid_, qps[i]->m_targets[qps[i]->current_device]->dct_num_);
+        zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
-        zDCQP_read(qps[i]->m_pd->m_requestors[qps[i]->current_device][0], qps[i]->m_targets[qps[i]->current_device]->ah, local_buf, mr->lkey, alloc_size, (void*)addr, rkey, qps[i]->m_targets[qps[i]->current_device]->lid_, qps[i]->m_targets[qps[i]->current_device]->dct_num_);
+        zDCQP_read(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        for(int j = 0; j < alloc_size; j ++) {
+        for(int j = 0; j < alloc_size; j++) {
             if(((char*)local_buf)[j] != 1) {
                 printf("Data mismatch at byte %d\n", j);
                 break;
@@ -68,7 +69,7 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
 
         pthread_barrier_wait(&barrier_start);
         for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
-            zDCQP_CAS(qps[i]->m_pd->m_requestors[qps[i]->current_device][0], qps[i]->m_targets[qps[i]->current_device]->ah, ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey, qps[i]->m_targets[qps[i]->current_device]->lid_, qps[i]->m_targets[qps[i]->current_device]->dct_num_);
+            zDCQP_CAS(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, ((uint64_t*)local_buf)+j, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], 2, (void*)((uint64_t)addr + j * sizeof(uint64_t)), table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             // z_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey);
         }
         memset(local_buf, 0, alloc_size);
