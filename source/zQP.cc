@@ -234,7 +234,7 @@ zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd) {
 
     // DCQP需要额外设置的内容
     init_attr.comp_mask |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS | IBV_QP_INIT_ATTR_PD ;
-    init_attr.send_ops_flags |= IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_RDMA_READ | IBV_QP_EX_WITH_RDMA_WRITE;
+    init_attr.send_ops_flags |= IBV_QP_EX_WITH_SEND | IBV_QP_EX_WITH_RDMA_READ | IBV_QP_EX_WITH_RDMA_WRITE | IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP;
  
     dv_init_attr.comp_mask |=
                 MLX5DV_QP_INIT_ATTR_MASK_DC |
@@ -376,7 +376,7 @@ zDCQP_responder* zDCQP_create_responder(zDevice *device, ibv_pd *pd) {
     qp_attr.pkey_index = 0;
     qp_attr.port_num = 1;
     qp_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE |
-                                IBV_ACCESS_REMOTE_READ; 
+                                IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
 
     int attr_mask =
         IBV_QP_STATE | IBV_QP_ACCESS_FLAGS | IBV_QP_PORT |IBV_QP_PKEY_INDEX;

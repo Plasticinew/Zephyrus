@@ -201,8 +201,8 @@ struct zPD {
     vector<ibv_pd*> m_pds;
     unordered_map<ibv_mr*, vector<ibv_mr*>> m_mrs;
     unordered_map<uint32_t, vector<uint32_t>> m_lkey_table;
-    vector<vector<zDCQP_requestor*> > m_requestors;   
-    vector<vector<zDCQP_responder*> > m_responders;
+    vector<vector<zDCQP_requestor*>> m_requestors;   
+    vector<vector<zDCQP_responder*>> m_responders;
 };
 
 struct zWR_entry {
