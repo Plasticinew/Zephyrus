@@ -1378,6 +1378,7 @@ int z_recovery(zQP *qp) {
                         int end_ = qp->entry_end_;
                         if(start_ > end_)
                             end_ += WR_ENTRY_NUM;
+                        ibv_send_wr* next_wr = send_wr->next;
                         if(start_ != end_){
                             for(int i = start_; i < end_; i++){
                                 if(qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp == local_time &&
@@ -1391,7 +1392,7 @@ int z_recovery(zQP *qp) {
                                 }
                             }
                         }
-                        send_wr = send_wr->next;
+                        send_wr = next_wr;
                     }
                 }
             }
