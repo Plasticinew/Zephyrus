@@ -15,6 +15,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/foreach.hpp>
+#include <tbb/concurrent_hash_map.h>
 #include <atomic>
 
 using std::string;
@@ -319,7 +320,7 @@ struct zQP
     zEndpoint *m_ep;
     rkeyTable *m_rkey_table;
     unordered_map<int, zQP_requestor*> m_requestors;
-    unordered_map<uint64_t, ibv_wc_status> completed_table;
+    tbb::concurrent_hash_map<uint64_t, ibv_wc_status> completed_table;
     unordered_map<int, zTarget*> m_targets;
     int primary_device = 0;
     int current_device = 0;
@@ -360,7 +361,7 @@ void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint
 int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, vector<uint64_t> *wr_ids);
 int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log, vector<uint64_t> *wr_ids);
 int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
-int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
+int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, uint64_t offset);
 int zQP_poll_thread(zQP *qp);
 
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
