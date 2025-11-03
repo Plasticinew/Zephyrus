@@ -199,7 +199,7 @@ void zQP_flush(qp_info_table* qp_info) {
                 if(atomic_buffer[j].target_addr != 0 && atomic_buffer[j].finished == 0) {
                     uint64_t target_addr = atomic_buffer[j].target_addr;
                     zAtomic_entry entry = *(zAtomic_entry*)(uintptr_t)target_addr;
-                    if(entry.offset != j || entry.qp_id != i) {
+                    if(entry.offset != j || entry.qp_id != i || entry.offset != j) {
                         atomic_buffer[j].finished = 2;
                         continue;
                     }
@@ -819,7 +819,7 @@ int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* r
     zqp->wr_entry_[entry_index].time_stamp = time_stamp;
     zqp->wr_entry_[entry_index].wr_addr = (uint64_t)send_wr;
     zqp->wr_entry_[entry_index].finished = 0;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     vector<uint64_t> wr_ids;
     wr_ids.push_back(wr_id);
 
@@ -859,7 +859,7 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
     zqp->wr_entry_[entry_index].time_stamp = entry->time_stamp;
     zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
     zqp->wr_entry_[entry_index].finished = 0;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     vector<uint64_t> wr_ids;
     wr_ids.push_back(wr_id);
     
@@ -930,7 +930,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     zqp->wr_entry_[offset].wr_addr = (uint64_t)send_wr;
     zqp->wr_entry_[offset].finished = 0;
     zqp->wr_entry_[offset].reserved = new_val;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[offset]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[offset])+1);
     vector<uint64_t> wr_ids;
     wr_ids.push_back(wr_id);
 
@@ -1023,6 +1023,7 @@ int zQP_CAS_step2(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, 
     struct ibv_send_wr *buffer_wr = new ibv_send_wr();
     zAtomic_buffer* buffer = new zAtomic_buffer();
     buffer->buffer = new_val;
+    buffer->finished = 0;
     buffer->target_addr = (uint64_t)(remote_addr);
     buffer->time_stamp = time_stamp;
     uint64_t old_val = *((uint64_t*)(buffer)+1);
@@ -1097,7 +1098,7 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
             buffer->finished = 0;
             buffer->target_addr = (uint64_t)(q->wr.atomic.remote_addr);
             buffer->time_stamp = time_stamp;
-            uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+            uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
             buffer_sge->addr = (uint64_t)(buffer);
             buffer_sge->length = sizeof(zAtomic_buffer);
             buffer_sge->lkey = 0;
@@ -1137,7 +1138,7 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
     zqp->wr_entry_[entry_index].time_stamp = entry->time_stamp;
     zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
     zqp->wr_entry_[entry_index].finished = 0;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     wr_ids->push_back(wr_id);
     
     if(non_idempotent){
@@ -1150,7 +1151,7 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
         log_wr->next = NULL;
         log_wr->opcode = IBV_WR_RDMA_WRITE;
         log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
-        log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + zqp->entry_end_ * sizeof(zWR_entry);
+        log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
         log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     }        
 
@@ -1187,7 +1188,7 @@ int zQP_read_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, v
     zqp->wr_entry_[entry_index].time_stamp = time_stamp;
     zqp->wr_entry_[entry_index].wr_addr = (uint64_t)send_wr;
     zqp->wr_entry_[entry_index].finished = 0;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     wr_ids->push_back(wr_id);
 
     send_wr->wr_id = wr_id;
@@ -1228,7 +1229,7 @@ int zQP_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, 
     zqp->wr_entry_[entry_index].time_stamp = entry->time_stamp;
     zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
     zqp->wr_entry_[entry_index].finished = 0;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     wr_ids->push_back(wr_id);
     
     if(use_log){
@@ -1303,7 +1304,7 @@ int zQP_CAS_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, v
     zqp->wr_entry_[entry_index].wr_addr = (uint64_t)send_wr;
     zqp->wr_entry_[entry_index].finished = 0;
     zqp->wr_entry_[entry_index].reserved = new_val;
-    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index]));
+    uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
     wr_ids->push_back(wr_id);
 
     send_wr->wr_id = wr_id;
@@ -1697,14 +1698,14 @@ int z_poll_completion(zQP* qp, vector<uint64_t> *wr_ids){
             if(qp->completed_table.find(a, id)){
                 uint64_t status = a->second;
                 if(status != IBV_WC_SUCCESS) {
-                    // std::cerr << "Error, operation failed: " << status << std::endl;
+                    std::cerr << "Error, operation failed: " << status << std::endl;
                     return_val = -1;
                     wr_ids->erase(std::remove(wr_ids->begin(), wr_ids->end(), id), wr_ids->end());
                     qp->completed_table.erase(a);
                     break;
                 }
                 int start_ = qp->entry_start_;
-                int end_ = qp->entry_end_;
+                int end_ = qp->entry_end_.load()%WR_ENTRY_NUM;
                 zWR_header* header = (zWR_header*)&id;
                 if(start_ > end_)
                     end_ += WR_ENTRY_NUM;
@@ -1752,7 +1753,7 @@ int z_recovery(zQP *qp) {
     new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     // read recovery log
     int start = qp->entry_start_;
-    int end = qp->entry_end_;
+    int end = qp->entry_end_.load()%WR_ENTRY_NUM;
     memset(qp->cmd_resp_, 0, sizeof(CmdMsgRespBlock));
     z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
    // z_read(qp, (void*)qp->cmd_resp_, qp->resp_mr_[0]->lkey, sizeof(CmdMsgRespBlock), (void*)qp->m_requestors[recovery_device]->server_cmd_msg_, qp->m_requestors[recovery_device]->server_cmd_rkey_[0]);
@@ -1778,7 +1779,7 @@ int z_recovery(zQP *qp) {
                     printf("qp %d resend local timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", qp->qp_id_, local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                     z_CAS(qp, (uint64_t*)send_wr->sg_list->addr, send_wr->sg_list->lkey, qp->wr_entry_[i%WR_ENTRY_NUM].reserved, (void*)send_wr->wr.atomic.remote_addr, send_wr->wr.atomic.rkey);
                     int start_ = qp->entry_start_;
-                    int end_ = qp->entry_end_;
+                    int end_ = qp->entry_end_.load()%WR_ENTRY_NUM;
                     if(start_ > end_)
                         end_ += WR_ENTRY_NUM;
                     if(start_ != end_){
@@ -1829,7 +1830,7 @@ int z_recovery(zQP *qp) {
                             continue;
                         }
                         int start_ = qp->entry_start_;
-                        int end_ = qp->entry_end_;
+                        int end_ = qp->entry_end_.load()%WR_ENTRY_NUM;
                         if(start_ > end_)
                             end_ += WR_ENTRY_NUM;
                         ibv_send_wr* next_wr = send_wr->next;
