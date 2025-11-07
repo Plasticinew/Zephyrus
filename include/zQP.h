@@ -314,13 +314,18 @@ struct zQP_listener {
     thread *flush_thread_;
 };
 
+struct cq_info {
+    ibv_wc_status status;
+    int device_id;
+};
+
 struct zQP
 {
     zPD *m_pd;
     zEndpoint *m_ep;
     rkeyTable *m_rkey_table;
     unordered_map<int, zQP_requestor*> m_requestors;
-    tbb::concurrent_hash_map<uint64_t, ibv_wc_status> completed_table;
+    tbb::concurrent_hash_map<uint64_t, cq_info> completed_table;
     unordered_map<int, zTarget*> m_targets;
     int primary_device = 0;
     int current_device = 0;
@@ -377,6 +382,7 @@ int worker_write(ibv_qp *qp, ibv_cq *cq, uint64_t local_addr, uint32_t lkey, uin
 int z_read(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
 int z_write(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
 int z_CAS(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey);
+int z_switch(zQP *qp);
 int z_recovery(zQP *qp);
 
 int z_read_async(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, vector<uint64_t> *wr_ids);
