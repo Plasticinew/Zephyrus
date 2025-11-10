@@ -55,14 +55,20 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         }
         int nic_index = 0;
         std::vector<uint64_t> wr_ids;
+        auto star_time = TIME_NOW;
         for(int k = 0; k < 1000; k++) {
             for(int j = 0; j < alloc_size ; j++){
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
                 z_write(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey);
+                // z_write_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey, &wr_ids);
             }
             // z_poll_completion(qps[i], &wr_ids);
             // printf("Thread %d, QP %d, write iteration %d completed\n", thread_id, i, k);
         }
+        auto end_time = TIME_NOW;
+        double total_us = TIME_DURATION_US(star_time, end_time);
+        double throughput = (double)(alloc_size * 1000) / (total_us);
+        printf("Thread %d, QP %d, Time spend: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, throughput);
         // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
@@ -71,6 +77,7 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         for(int j = 0; j < alloc_size; j++){
             // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             z_read(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey);
+            // z_read_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey, &wr_ids);
         }
         // z_poll_completion(qps[i], &wr_ids);
         for(int j = 0; j < alloc_size; j++) {

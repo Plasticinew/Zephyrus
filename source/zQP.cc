@@ -834,6 +834,7 @@ int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* r
 
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         std::cerr << "Error, ibv_post_send failed" << std::endl;
         return -1;
     }
@@ -897,7 +898,9 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
     send_wr->wr.rdma.rkey = rkey;
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         perror("Error, ibv_post_send failed");
+        return -1;
     }
 
     delete entry;
@@ -970,6 +973,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     ibv_qp* qp = requestor->qp_;
     int result;
     if (result = ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[offset].finished = 1;
         std::cerr << "Error, ibv_post_send failed:" << result << std::endl;
         return -1;
     }
@@ -1139,7 +1143,6 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
     zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
     zqp->wr_entry_[entry_index].finished = 0;
     uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
-    wr_ids->push_back(wr_id);
     
     if(non_idempotent){
         log_sge->addr = (uint64_t)(entry);
@@ -1161,9 +1164,10 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
         q->send_flags = 0;
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, copy_wr, bad_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         perror("Error, ibv_post_send failed");
     }
-
+    wr_ids->push_back(wr_id);
     // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
 
     delete entry;
@@ -1189,7 +1193,6 @@ int zQP_read_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, v
     zqp->wr_entry_[entry_index].wr_addr = (uint64_t)send_wr;
     zqp->wr_entry_[entry_index].finished = 0;
     uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
-    wr_ids->push_back(wr_id);
 
     send_wr->wr_id = wr_id;
     send_wr->sg_list = sge;
@@ -1202,9 +1205,11 @@ int zQP_read_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, v
 
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         std::cerr << "Error, ibv_post_send failed" << std::endl;
         return -1;
     }
+    wr_ids->push_back(wr_id);
 
     // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
 
@@ -1230,7 +1235,6 @@ int zQP_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, 
     zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
     zqp->wr_entry_[entry_index].finished = 0;
     uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
-    wr_ids->push_back(wr_id);
     
     if(use_log){
         log_sge->addr = (uint64_t)(entry);
@@ -1266,8 +1270,11 @@ int zQP_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, 
     send_wr->wr.rdma.rkey = rkey;
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         perror("Error, ibv_post_send failed");
+        return -1;
     }
+    wr_ids->push_back(wr_id);
 
     // zqp->wr_entry_[zqp->entry_end_] = *entry;
 
@@ -1305,7 +1312,6 @@ int zQP_CAS_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, v
     zqp->wr_entry_[entry_index].finished = 0;
     zqp->wr_entry_[entry_index].reserved = new_val;
     uint64_t wr_id = *((uint64_t*)(&zqp->wr_entry_[entry_index])+1);
-    wr_ids->push_back(wr_id);
 
     send_wr->wr_id = wr_id;
     send_wr->sg_list = sge;
@@ -1343,9 +1349,11 @@ int zQP_CAS_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, v
     ibv_qp* qp = requestor->qp_;
     int result;
     if (result = ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        zqp->wr_entry_[entry_index].finished = 1;
         std::cerr << "Error, ibv_post_send failed:" << result << std::endl;
         return -1;
     }
+    wr_ids->push_back(wr_id);
 
     // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
 
@@ -1748,13 +1756,13 @@ int z_poll_completion(zQP* qp, vector<uint64_t> *wr_ids){
     }
     if (return_val < 0){
         if(error_device != qp->current_device){
-            z_recovery(qp);
+            // z_recovery(qp);
         } else {
             qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
             qp->m_ep->m_devices[qp->current_device]->status = ZSTATUS_ERROR;
             std::cout << "Error, connection lost, start recovery" << std::endl;
             z_switch(qp);
-            z_recovery(qp);
+            // z_recovery(qp);
         }
     }
     return return_val;
@@ -1767,13 +1775,13 @@ int z_switch(zQP *qp) {
     }
     int recovery_device = qp->current_device;
     qp->current_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
-    // zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
-    new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
+    zQP_connect(qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
+    // new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
     return 0;
 }
 
 int z_recovery(zQP *qp) {
-    int recovery_device = (qp->current_device + 1) % qp->m_ep->m_devices.size();
+    int recovery_device = (qp->current_device - 1) % qp->m_ep->m_devices.size();
     printf("Start recovery on device %d\n", qp->current_device);
     // read recovery log
     int start = qp->entry_start_;
