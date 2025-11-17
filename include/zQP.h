@@ -16,7 +16,9 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/foreach.hpp>
 #include <tbb/concurrent_hash_map.h>
+#include <tbb/concurrent_vector.h>
 #include <atomic>
+#include <mutex>
 
 using std::string;
 using std::vector;
@@ -79,7 +81,7 @@ struct zDevice
     string eth_ip;
     string port;
     ibv_context *context = NULL;
-    zStatus status = ZSTATUS_INIT;
+    std::atomic<zStatus> status{zStatus::ZSTATUS_INIT};
 };
 
 enum zQPType
@@ -199,11 +201,12 @@ struct zDCQP_responder {
 
 
 struct zPD {
-    vector<ibv_pd*> m_pds;
-    unordered_map<ibv_mr*, vector<ibv_mr*>> m_mrs;
-    unordered_map<uint32_t, vector<uint32_t>> m_lkey_table;
+    tbb::concurrent_vector<ibv_pd*> m_pds;
+    tbb::concurrent_hash_map<ibv_mr*, tbb::concurrent_vector<ibv_mr*>> m_mrs;
+    tbb::concurrent_hash_map<uint32_t, tbb::concurrent_vector<uint32_t>> m_lkey_table;
     vector<vector<zDCQP_requestor*>> m_requestors;   
     vector<vector<zDCQP_responder*>> m_responders;
+    std::mutex pd_mutex;
 };
 
 struct zWR_entry {
@@ -289,7 +292,7 @@ struct zEndpoint
     vector<zDevice*> m_devices;
     int m_device_num;
     int m_node_id;
-    atomic<uint64_t> qp_num_ = 1;
+    std::atomic<uint64_t> qp_num_{1};
 };
 
 struct zQP_responder
@@ -336,7 +339,7 @@ struct zQP
     unordered_map<int, ibv_mr*> resp_mr_;
     zWR_entry wr_entry_[WR_ENTRY_NUM];
     int entry_start_ = 0;
-    std::atomic<int> entry_end_ = 0;
+    std::atomic<int> entry_end_{0};
     zQPType qp_type;
     int qp_id_ = 0;
     uint64_t remote_atomic_table_addr = 0;
