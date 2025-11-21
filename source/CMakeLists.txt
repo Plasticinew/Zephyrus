@@ -1,10 +1,10 @@
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-set(BASE_SOURCE zQP.cc)
+set(BASE_SOURCE zQP.cc ib.cc)
 
 add_library(zQP STATIC ${BASE_SOURCE})
-target_link_libraries(zQP ibverbs rdmacm pthread rt mlx5 tbb)
+target_link_libraries(zQP ibverbs rdmacm pthread rt mlx5 tbb profiler)
 
 add_executable(zServer zServer.cc)
 target_link_libraries(zServer zQP )

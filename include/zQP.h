@@ -34,8 +34,8 @@ namespace Zephyrus {
 #define MAX_SERVER_WORKER 1
 #define MAX_SERVER_CLIENT 4096
 #define RESOLVE_TIMEOUT_MS 5000
-#define RDMA_TIMEOUT_US (uint64_t)10000000
-#define RETRY_TIMEOUT 1 
+#define RDMA_TIMEOUT_US (uint64_t)1000000
+#define RETRY_TIMEOUT 0 
 #define MAX_REQUESTOR_NUM 32768
 #define MAX_REMOTE_SIZE (1UL << 25)
 
@@ -48,6 +48,21 @@ namespace Zephyrus {
 
 
 #define MAX_NIC_NUM 2
+
+struct QpInfo {
+    uint32_t qp_num;
+    uint16_t lid;
+    uint8_t  port_num;
+    uint8_t  gid[16];
+    uint8_t  gid_idx;
+};
+
+struct ibv_context * ib_get_ctx(uint32_t dev_id, uint32_t port_id);
+struct ibv_qp * ib_create_rc_qp(struct ibv_pd * ib_pd, struct ibv_qp_init_attr * qp_init_attr);
+
+int ib_connect_qp(struct ibv_qp * local_qp, 
+    const struct QpInfo * local_qp_info, 
+    const struct QpInfo * remote_qp_info, uint8_t conn_type, bool server);
 
 struct zDeviceConfig {
     uint16_t node_id;
@@ -82,6 +97,7 @@ struct zDevice
     string port;
     ibv_context *context = NULL;
     std::atomic<zStatus> status{zStatus::ZSTATUS_INIT};
+    tbb::concurrent_vector<ibv_cq*> cq_list_;
 };
 
 enum zQPType
@@ -180,6 +196,7 @@ struct zDCQP_requestor {
     uint8_t port_num_;
     uint16_t lid_;
     uint32_t dct_num_;
+    // atomic<uint64_t> size_counter_{0};
 };
 
 
@@ -287,12 +304,21 @@ struct zTarget{
 
 typedef unordered_map<uint32_t, vector<uint32_t>> rkeyTable;
 
+
+struct cq_info {
+    ibv_wc_status status;
+    int valid;
+    int device_id;
+};
+
 struct zEndpoint
 {
     vector<zDevice*> m_devices;
     int m_device_num;
     int m_node_id;
     std::atomic<uint64_t> qp_num_{1};
+    tbb::concurrent_hash_map<uint64_t, cq_info> completed_table;
+    bool stop = false;
 };
 
 struct zQP_responder
@@ -317,18 +343,13 @@ struct zQP_listener {
     thread *flush_thread_;
 };
 
-struct cq_info {
-    ibv_wc_status status;
-    int device_id;
-};
 
 struct zQP
 {
     zPD *m_pd;
     zEndpoint *m_ep;
     rkeyTable *m_rkey_table;
-    unordered_map<int, zQP_requestor*> m_requestors;
-    tbb::concurrent_hash_map<uint64_t, cq_info> completed_table;
+    tbb::concurrent_vector<zQP_requestor*> m_requestors;
     unordered_map<int, zTarget*> m_targets;
     int primary_device = 0;
     int current_device = 0;
@@ -340,6 +361,7 @@ struct zQP
     zWR_entry wr_entry_[WR_ENTRY_NUM];
     int entry_start_ = 0;
     std::atomic<int> entry_end_{0};
+    std::atomic<uint64_t> size_counter_{0};
     zQPType qp_type;
     int qp_id_ = 0;
     uint64_t remote_atomic_table_addr = 0;
@@ -351,6 +373,8 @@ struct zQP
 zEndpoint* zEP_create(string config_file);
 zPD* zPD_create(zEndpoint *ep, int pool_size);
 zQP* zQP_create(zPD* pd, zEndpoint *ep, rkeyTable* table, zQPType qp_type);
+void zEP_destroy(zEndpoint *ep);
+void zPD_destroy(zPD *pd);
 
 zDCQP_requestor* zDCQP_create_requestor(zDevice *device, ibv_pd *pd);
 int zQP_connect(zQP *qp, int nic_index, string ip, string port);
@@ -367,6 +391,11 @@ int zQP_listen(zQP_listener *zqp, int nic_index, string ip, string port);
 int zQP_accept(zQP_listener *zqp, int nic_index, rdma_cm_id *cm_id, zQPType qp_type, int node_id);
 void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint32_t num);
 
+int z_simple_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
+int z_simple_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey);
+int z_simple_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, vector<uint64_t> *wr_ids);
+int z_simple_read_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, vector<uint64_t> *wr_ids);
+int z_simple_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey);
 int zQP_read(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
 int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log);
 int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp);
@@ -376,7 +405,7 @@ int zQP_read_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, v
 int zQP_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log, vector<uint64_t> *wr_ids);
 int zQP_CAS_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, vector<uint64_t> *wr_ids);
 int zQP_CAS_step2_async(zQP *zqp, uint64_t new_val, void* remote_addr, uint32_t rkey, uint32_t time_stamp, uint64_t offset);
-int zQP_poll_thread(zQP *qp);
+int zQP_poll_thread(zEndpoint *zep);
 int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent, uint32_t time_stamp, vector<uint64_t> *wr_ids);
 
 void zQP_RPC_Alloc(zQP* qp, uint64_t* addr, uint32_t* rkey, size_t size);
@@ -393,6 +422,7 @@ int z_write_async(zQP *qp, void* local_addr, uint32_t lkey, uint64_t length, voi
 int z_CAS_async(zQP *qp, void* local_addr, uint32_t lkey, uint64_t new_val, void* remote_addr, uint32_t rkey, vector<uint64_t> *wr_ids);
 int z_post_send_async(zQP* qp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent, uint32_t time_stamp, vector<uint64_t> *wr_ids);
 int z_poll_completion(zQP* qp, vector<uint64_t> *wr_ids);
+int z_poll_completion(zQP* qp, uint64_t wr_id);
 
 int load_config(const char* fname, struct zDeviceConfig* config);
 int load_config(const char* fname, struct zTargetConfig* config);
