@@ -5,15 +5,18 @@
 
 using namespace Zephyrus;
 
+// #define SHARED_EP_NUM 4
+
 pthread_barrier_t barrier_start;
 
 std::atomic<int> global_counter{0};
 std::atomic<int> global_latency{0};
 
 void nic_shutdown_handler() {
-    usleep(500000);
-    // system("sudo ip link set ens3f0 down");
-    system("sudo ifconfig ens3f0 down");
+    // usleep(rand() % 500000 + 500000);
+    // usleep(500000);
+    system("sudo ip link set ens3f0 down");
+    // system("sudo ifconfig ens3f0 down");
 }
 
 void bandwidth_counting_thread(tbb::concurrent_vector<std::atomic<uint64_t>*>& counter_vec) {
@@ -33,13 +36,18 @@ void bandwidth_counting_thread(tbb::concurrent_vector<std::atomic<uint64_t>*>& c
         log_file << mbps << std::endl;
     }
 }
+#ifdef SHARED_EP_NUM
 void test_zQP_shared_p2p(string config_file, string remote_config_file, zEndpoint* ep, zPD* pd, int thread_id, tbb::concurrent_vector<std::atomic<uint64_t>*>& counter_vec, int thread_count, int write_size) {
-// void test_zQP_shared_p2p(string config_file, string remote_config_file, int thread_id, tbb::concurrent_vector<std::atomic<uint64_t>*>& counter_vec, int thread_count, int write_size) {
+#else
+void test_zQP_shared_p2p(string config_file, string remote_config_file, int thread_id, tbb::concurrent_vector<std::atomic<uint64_t>*>& counter_vec, int thread_count, int write_size) {
+#endif
     rkeyTable *table = new rkeyTable();
     vector<zQP*> qps;
     zTargetConfig config;
-    // zEndpoint *ep = zEP_create(config_file);
-    // zPD *pd = zPD_create(ep, 1);
+#ifndef SHARED_EP_NUM
+    zEndpoint *ep = zEP_create(config_file);
+    zPD *pd = zPD_create(ep, 1);
+#endif
     load_config(remote_config_file.c_str(), &config);
     zQP* rpc_qp = zQP_create(pd, ep, table, ZQP_RPC);
     zQP_connect(rpc_qp, 0, config.target_ips[0], config.target_ports[0]);
@@ -47,7 +55,7 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, zEndpoin
     for(int i = 0; i < qp_per_thread; i ++) {
         zQP* qp = zQP_create(pd, ep, table, ZQP_ONESIDED);
         zQP_connect(qp, 0, config.target_ips[0], config.target_ports[0]);
-        // zQP_connect(qp, 1, qp->m_targets[1]->ip, qp->m_targets[1]->port);
+        zQP_connect(qp, 1, qp->m_targets[1]->ip, qp->m_targets[1]->port);
         qps.push_back(qp);
         counter_vec.push_back(&qp->size_counter_);
     }
@@ -85,11 +93,11 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, zEndpoin
         *counter = 0;
         // z_simple_write(qps[0], ((char*)local_buf), mr->lkey, sizeof(uint64_t), (void*)(addr), rkey);
         pthread_barrier_wait(&barrier_start);
-        for(int k = 0; k < 40000; k++) {
+        for(int k = 0; k < 4000; k++) {
             // int i = distribution(generator);
             int result;
             auto star_time = TIME_NOW;
-            for(int j = 0; j < 10; j++){
+            for(int j = 0; j < 100; j++){
                 // *counter = k*1024 + j;
                 int target = k + j + 1;
                 // *counter = target;
@@ -124,9 +132,14 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, zEndpoin
                 // z_CAS(qps[i], ((uint64_t*)local_buf), mr->lkey, 2, (void*)(addr), rkey);
                 // z_write_async(qps[i], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
             }
+            // auto send_time = TIME_NOW;
             // z_poll_completion(qps[0], &wr_ids);
             auto end_time = TIME_NOW;
             double total_us = TIME_DURATION_US(star_time, end_time);
+            // double write_us = TIME_DURATION_US(star_time, send_time);
+            // double poll_us = TIME_DURATION_US(send_time, end_time);
+            // printf("send time: %lf us, poll time: %lf us, total time: %lf us\n", write_us, poll_us, total_us);
+            // printf("send time: %lf us, poll time: %lf us, total time: %lf us\n", TIME_DURATION_US(star_time, send_time), TIME_DURATION_US(send_time, end_time), total_us);
             global_latency.fetch_add(total_us);
             // usleep(100);
             // printf("Thread %d, QP %d, write iteration %d completed\n", thread_id, i, k);
@@ -291,19 +304,25 @@ int main(int argc, char** argv) {
     std::vector<std::thread*> threads;
     tbb::concurrent_vector<std::atomic<uint64_t>*> counter_vec;
     int test_size[] = {16, 64, 256, 1024, 4096, 16384, 65536};
-    for(int j = 6; j < 7; j++) {
-        zEndpoint *ep[4];
-        for(int i = 0; i < 4; i ++) {
+    for(int j = 0; j < 7; j++) {
+#ifdef SHARED_EP_NUM
+        zEndpoint *ep[SHARED_EP_NUM];
+        for(int i = 0; i < SHARED_EP_NUM; i ++) {
             ep[i] = zEP_create(config_file);
         }
-        zPD *pd[4];
-        for(int i = 0; i < 4; i ++) {
+        zPD *pd[SHARED_EP_NUM];
+        for(int i = 0; i < SHARED_EP_NUM; i ++) {
             pd[i] = zPD_create(ep[i], 1);
         }
+#endif
         for(int i = 0; i < thread_num; i ++) {
             // threads.push_back(new std::thread(test_zQP, config_file, remote_config_file, i));
             // threads.push_back(new std::thread(test_zQP_shared_p2p, config_file, remote_config_file, i, std::ref(counter_vec), thread_num, test_size[j]));
-            threads.push_back(new std::thread(test_zQP_shared_p2p, config_file, remote_config_file, ep[i % 1], pd[i % 1], i, std::ref(counter_vec), thread_num, test_size[j]));
+#ifdef SHARED_EP_NUM
+            threads.push_back(new std::thread(test_zQP_shared_p2p, config_file, remote_config_file, ep[i % SHARED_EP_NUM], pd[i % SHARED_EP_NUM], i, std::ref(counter_vec), thread_num, test_size[j]));
+#else
+            threads.push_back(new std::thread(test_zQP_shared_p2p, config_file, remote_config_file, i, std::ref(counter_vec), thread_num, test_size[j]));
+#endif
             // threads.push_back(new std::thread(test_zQP_shared, config_file, remote_config_file, i, std::ref(counter_vec)));
             // threads.push_back(new std::thread(test_zQP_shared, config_file, remote_config_file, ep, pd, i, std::ref(listen_qps)));
         }
@@ -322,12 +341,14 @@ int main(int argc, char** argv) {
         global_latency.store(0);
         global_counter.store(0);
         counter_vec.clear();
-        for(int i = 0; i < 4; i ++) {
+#ifdef SHARED_EP_NUM
+        for(int i = 0; i < SHARED_EP_NUM; i ++) {
             zEP_destroy(ep[i]);
         }
-        for(int i = 0; i < 4; i ++) {
+        for(int i = 0; i < SHARED_EP_NUM; i ++) {
             zPD_destroy(pd[i]);
         }
+#endif
     }
     // printf("%lf\n", global_counter.load()/(1000*thread_num*1.0));
     pthread_barrier_destroy(&barrier_start);

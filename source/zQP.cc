@@ -2,11 +2,13 @@
 #include "zQP.h"
 #include <gperftools/profiler.h>
 
-// #define RECOVERY
+#define RECOVERY
 
-// #define POLLTHREAD
+#define POLLTHREAD
 
-#define ASYNC_CONNECT
+#define SEND_TWICE
+
+// #define ASYNC_CONNECT
 
 namespace Zephyrus {
 
@@ -719,7 +721,7 @@ int zQP_connect(zQP *qp, int nic_index, string ip, string port) {
     assert(result == 0);
     assert(event->event == RDMA_CM_EVENT_ROUTE_RESOLVED);
     rdma_ack_cm_event(event);
-        printf("QP connected in %ld us: qp_id=%u, nic_index=%d, server_qp_id=%u\n", TIME_DURATION_US(start, TIME_NOW), qp->qp_id_, nic_index, qp_instance->qp_id_);
+        // printf("QP connected in %ld us: qp_id=%u, nic_index=%d, server_qp_id=%u\n", TIME_DURATION_US(start, TIME_NOW), qp->qp_id_, nic_index, qp_instance->qp_id_);
 
     // Addr route resolve finished
     ibv_cq* cq = NULL;
@@ -2464,8 +2466,9 @@ int z_recovery(zQP *qp) {
             } else {
                 int local_time = qp->wr_entry_[i%WR_ENTRY_NUM].time_stamp;
                 int remote_time = entry[i%WR_ENTRY_NUM].time_stamp;
-                
+#ifndef SEND_TWICE
                 if((local_time > remote_time && local_time - remote_time < 16384) || (local_time < remote_time && remote_time - local_time > 16384)){
+#endif
                     // attention: 48bit address to 64bit address
                     while(send_wr != NULL){
                         if(send_wr->opcode == IBV_WR_RDMA_WRITE){
@@ -2504,9 +2507,11 @@ int z_recovery(zQP *qp) {
                         }
                         send_wr = next_wr;
                     }
+#ifndef SEND_TWICE
                 } else if (local_time == remote_time){
                     // printf("finished timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                 } 
+#endif
             }
         }
     }
