@@ -2,13 +2,15 @@
 #include "zQP.h"
 #include <gperftools/profiler.h>
 
-#define RECOVERY
+// #define RECOVERY
 
-#define POLLTHREAD
+// #define POLLTHREAD
 
-#define SEND_TWICE
+// #define SEND_TWICE
 
 // #define ASYNC_CONNECT
+
+#define NO_ERROR_HANDLE
 
 namespace Zephyrus {
 
@@ -1101,6 +1103,7 @@ int z_simple_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, vo
     send_wr->wr.atomic.swap = new_val;
     ibv_qp* qp = requestor->qp_;
     if (ibv_post_send(qp, send_wr, &bad_send_wr)) {
+        std::cout << "Send error" << std::endl;
         z_switch(zqp);
         return -1;
     }
@@ -1112,11 +1115,12 @@ int z_simple_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, vo
         if(TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US) {
             z_switch(zqp);
             result = -1;
-            // std::cerr << "Error, read timeout" << std::endl;
+            std::cout << "Error, read timeout" << std::endl;
             break;
         }
         if(ibv_poll_cq(cq, 1, &wc) > 0) {
             if(wc.status != IBV_WC_SUCCESS) {
+                std::cout << "Wc error " << wc.status << std::endl;
                 z_switch(zqp);
                 result = -1;
                 break;
@@ -2378,7 +2382,8 @@ int z_poll_completion(zQP* qp, vector<uint64_t> *wr_ids){
 }
 
 int z_switch(zQP *qp) {
-    // printf("Start switch on device %d\n", qp->current_device);
+    printf("Start switch on device %d\n", qp->current_device);
+#ifndef NO_ERROR_HANDLE
     zStatus expected = ZSTATUS_INIT;
     qp->m_ep->m_devices[qp->current_device]->status.compare_exchange_strong(expected, ZSTATUS_ERROR);
     qp->m_requestors[qp->current_device]->status_ = ZSTATUS_ERROR;
@@ -2395,6 +2400,7 @@ int z_switch(zQP *qp) {
         new std::thread(&zQP_connect, qp, qp->current_device, qp->m_targets[qp->current_device]->ip, qp->m_targets[qp->current_device]->port);
 #endif
     }
+#endif
     return 0;
 }
 

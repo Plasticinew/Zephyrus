@@ -14,8 +14,9 @@ std::atomic<int> global_latency{0};
 
 void nic_shutdown_handler() {
     // usleep(rand() % 500000 + 500000);
-    // usleep(500000);
-    system("sudo ip link set ens3f0 down");
+    usleep(500000);
+    system("sudo ip link set ens1f0 down");
+    printf("ens1f0 down\n");
     // system("sudo ifconfig ens3f0 down");
 }
 
@@ -55,7 +56,7 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
     for(int i = 0; i < qp_per_thread; i ++) {
         zQP* qp = zQP_create(pd, ep, table, ZQP_ONESIDED);
         zQP_connect(qp, 0, config.target_ips[0], config.target_ports[0]);
-        zQP_connect(qp, 1, qp->m_targets[1]->ip, qp->m_targets[1]->port);
+        // zQP_connect(qp, 1, qp->m_targets[1]->ip, qp->m_targets[1]->port);
         qps.push_back(qp);
         counter_vec.push_back(&qp->size_counter_);
     }
@@ -99,6 +100,7 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
             auto star_time = TIME_NOW;
             for(int j = 0; j < 100; j++){
                 // *counter = k*1024 + j;
+                int prev = *counter;
                 int target = k + j + 1;
                 // *counter = target;
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
@@ -107,15 +109,20 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
                 // z_read_async(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
                 // z_simple_write_async(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
                 // int result = z_simple_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
-                int result = z_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
+                // int result = z_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_simple_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
-                // result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
+                result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
                 // result = z_CAS(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey);
                 // result = z_CAS_async(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey, &wr_ids);
                 // printf("%d:%d\n", *counter, target);
                 // z_simple_read(qps[0], ((char*)local_buf), mr->lkey, sizeof(uint64_t), (void*)(addr), rkey);
                 // printf("%d:%d\n", *counter, target);
+                if(*(counter) != prev){
+                    printf("CAS error!\n");
+                } else {
+                    *(counter) = target;
+                }
                 // if(result < 0) {
                 //     // printf("%d:%d\n", *counter, target);
                 //     z_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
@@ -128,7 +135,7 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
                 //     } 
                 //     // break;
                 // }
-                *(counter+j) = target;
+                // *(counter+j) = target;
                 // z_CAS(qps[i], ((uint64_t*)local_buf), mr->lkey, 2, (void*)(addr), rkey);
                 // z_write_async(qps[i], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
             }
@@ -288,9 +295,9 @@ void test_zQP_shared(string config_file, string remote_config_file, int thread_i
 int main(int argc, char** argv) {
     std::ofstream log_file("bandwidth_log.txt");
     log_file.close();
-    system("sudo ip link set ens3f0 up");
-    system("sudo ifconfig ens3f0 10.10.1.1/24");
-    system("sudo ip link set ens3f1 up");
+    system("sudo ip link set ens1f0 up");
+    // system("sudo ifconfig ens3f0 10.10.1.1/24");
+    system("sudo ip link set ens1f1 up");
     sleep(2);
     if(argc < 4) {
         printf("Usage: %s <local_config_file> <remote_config_file> <thread_num>\n", argv[0]);
@@ -330,9 +337,9 @@ int main(int argc, char** argv) {
         for(int i = 0; i < thread_num; i ++) {
             threads[i]->join();
         }
-        system("sudo ip link set ens3f0 up");
-        system("sudo ifconfig ens3f0 10.10.1.1/24");
-        system("sudo ip link set ens3f1 up");
+        system("sudo ip link set ens1f0 up");
+        // system("sudo ifconfig ens1f0 10.10.1.1/24");
+        system("sudo ip link set ens1f1 up");
         threads.clear();
         sleep(2);
         // printf("%lf\n", global_counter.load()/(thread_num*1.0));

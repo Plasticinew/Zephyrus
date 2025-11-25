@@ -34,8 +34,9 @@ namespace Zephyrus {
 #define MAX_SERVER_WORKER 1
 #define MAX_SERVER_CLIENT 4096
 #define RESOLVE_TIMEOUT_MS 5000
-#define RDMA_TIMEOUT_US (uint64_t)1000000
-#define RETRY_TIMEOUT 0 
+#define RDMA_TIMEOUT_US (uint64_t)10000000
+// #define RETRY_TIMEOUT 0 
+#define RETRY_TIMEOUT 7 
 #define MAX_REQUESTOR_NUM 32768
 #define MAX_REMOTE_SIZE (1UL << 25)
 
