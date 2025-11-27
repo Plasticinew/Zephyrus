@@ -1,4 +1,4 @@
 
-set(BASE_INCLUDE zUtils.h zQP.h)
+set(BASE_INCLUDE zqp.hpp common.hpp)
 
 install(FILES ${BASE_INCLUDE} DESTINATION include)

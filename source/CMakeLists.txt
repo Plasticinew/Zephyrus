@@ -1,21 +1,21 @@
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-set(BASE_SOURCE zQP.cc ib.cc)
+set(BASE_SOURCE zqp.cc ib.cc)
 
-add_library(zQP STATIC ${BASE_SOURCE})
-target_link_libraries(zQP ibverbs rdmacm pthread rt mlx5 tbb profiler)
+add_library(zqp STATIC ${BASE_SOURCE})
+target_link_libraries(zqp ibverbs rdmacm pthread rt mlx5 tbb profiler)
 
-add_executable(zServer zServer.cc)
-target_link_libraries(zServer zQP )
+add_executable(zserver zserver.cc)
+target_link_libraries(zserver zqp )
 
 add_executable(zClient zClient.cc)
-target_link_libraries(zClient zQP )
+target_link_libraries(zClient zqp )
 
 add_executable(latency_test latency_test.cc)
-target_link_libraries(latency_test zQP )
+target_link_libraries(latency_test zqp )
 
-install(TARGETS zQP
+install(TARGETS zqp
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
