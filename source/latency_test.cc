@@ -109,20 +109,20 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
                 // z_read_async(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
                 // z_simple_write_async(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
                 // int result = z_simple_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
-                // int result = z_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
+                int result = z_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_simple_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
-                result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
+                // result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
                 // result = z_CAS(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey);
                 // result = z_CAS_async(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey, &wr_ids);
                 // printf("%d:%d\n", *counter, target);
                 // z_simple_read(qps[0], ((char*)local_buf), mr->lkey, sizeof(uint64_t), (void*)(addr), rkey);
                 // printf("%d:%d\n", *counter, target);
-                if(*(counter) != prev){
-                    printf("CAS error!\n");
-                } else {
-                    *(counter) = target;
-                }
+                // if(*(counter) != prev){
+                //     printf("CAS error!\n");
+                // } else {
+                //     *(counter) = target;
+                // }
                 // if(result < 0) {
                 //     // printf("%d:%d\n", *counter, target);
                 //     z_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
     std::ofstream log_file("bandwidth_log.txt");
     log_file.close();
     system("sudo ip link set ens1f0 up");
-    // system("sudo ifconfig ens3f0 10.10.1.1/24");
+    system("sudo ifconfig ens1f0 10.10.1.4/24");
     system("sudo ip link set ens1f1 up");
     sleep(2);
     if(argc < 4) {
@@ -338,7 +338,7 @@ int main(int argc, char** argv) {
             threads[i]->join();
         }
         system("sudo ip link set ens1f0 up");
-        // system("sudo ifconfig ens1f0 10.10.1.1/24");
+        system("sudo ifconfig ens1f0 10.10.1.4/24");
         system("sudo ip link set ens1f1 up");
         threads.clear();
         sleep(2);

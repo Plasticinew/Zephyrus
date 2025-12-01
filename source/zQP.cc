@@ -2,15 +2,15 @@
 #include "zQP.h"
 #include <gperftools/profiler.h>
 
-// #define RECOVERY
+#define RECOVERY
 
 // #define POLLTHREAD
 
 // #define SEND_TWICE
 
-// #define ASYNC_CONNECT
+#define ASYNC_CONNECT
 
-#define NO_ERROR_HANDLE
+// #define NO_ERROR_HANDLE
 
 namespace Zephyrus {
 
@@ -1266,7 +1266,7 @@ int zQP_write(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, void* 
         log_wr.num_sge = 1;
         log_wr.next = NULL;
         log_wr.opcode = IBV_WR_RDMA_WRITE;
-        log_wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+        log_wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE | IBV_SEND_FENCE;
         log_wr.wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
         log_wr.wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     }        
@@ -1381,7 +1381,7 @@ int zQP_CAS(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, void* r
     buffer_wr->num_sge = 1;
     buffer_wr->next = NULL;
     buffer_wr->opcode = IBV_WR_RDMA_WRITE;
-    buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
+    buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED | IBV_SEND_FENCE;
     buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + offset * sizeof(zAtomic_buffer);
     buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     send_wr->next = buffer_wr;
@@ -1629,7 +1629,7 @@ int zQP_post_send(zQP* zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non
         log_wr->num_sge = 1;
         log_wr->next = NULL;
         log_wr->opcode = IBV_WR_RDMA_WRITE;
-        log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+        log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE | IBV_SEND_FENCE;
         log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
         log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     }        
@@ -1731,7 +1731,7 @@ int zQP_write_async(zQP *zqp, void* local_addr, uint32_t lkey, uint64_t length, 
         log_wr->num_sge = 1;
         log_wr->next = NULL;
         log_wr->opcode = IBV_WR_RDMA_WRITE;
-        log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+        log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE | IBV_SEND_FENCE;
         log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
         log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     }        
@@ -1851,7 +1851,7 @@ int zQP_CAS_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t new_val, v
     buffer_wr->num_sge = 1;
     buffer_wr->next = NULL;
     buffer_wr->opcode = IBV_WR_RDMA_WRITE;
-    buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED;
+    buffer_wr->send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED | IBV_SEND_FENCE;
     buffer_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zAtomic_buffer);
     buffer_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
     send_wr->next = buffer_wr;
@@ -2515,7 +2515,7 @@ int z_recovery(zQP *qp) {
                     }
 #ifndef SEND_TWICE
                 } else if (local_time == remote_time){
-                    // printf("finished timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
+                    printf("finished timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                 } 
 #endif
             }
