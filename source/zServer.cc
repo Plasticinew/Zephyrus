@@ -1,6 +1,7 @@
-#include "zQP.h"
+#include "zqp.h"
+#include "zrdma.h"
 
-using namespace Zephyrus;
+using namespace zrdma;
 int main(int argc, char** argv) {
     if(argc < 2) {
         printf("Usage: %s <local_config_file>\n", argv[0]);

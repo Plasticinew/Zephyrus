@@ -1,4 +1,4 @@
-# Zephyrus
+# zrdma
 
 - [x] RPC Engine
 - [x] Basic RDMA Operations

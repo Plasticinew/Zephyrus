@@ -1,9 +1,9 @@
-#include "zQP.h"
+#include "zqp.h"
+#include "zrdma.h"
 #include <fstream>
 #include <random>
-#include <gperftools/profiler.h>
 
-using namespace Zephyrus;
+using namespace zrdma;
 
 // #define SHARED_EP_NUM 4
 
@@ -94,14 +94,13 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
         *counter = 0;
         // z_simple_write(qps[0], ((char*)local_buf), mr->lkey, sizeof(uint64_t), (void*)(addr), rkey);
         pthread_barrier_wait(&barrier_start);
-        for(int k = 0; k < 4000; k++) {
+        for(uint64_t k = 0; k < 4000; k++) {
             // int i = distribution(generator);
-            int result;
             auto star_time = TIME_NOW;
-            for(int j = 0; j < 100; j++){
+            for(uint64_t j = 0; j < 100; j++){
                 // *counter = k*1024 + j;
-                int prev = *counter;
-                int target = k + j + 1;
+                uint64_t prev = *counter;
+                uint64_t target = k + j + 1;
                 // *counter = target;
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
                 // z_write_async(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey, &wr_ids);
@@ -112,7 +111,7 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
                 // int result = z_write(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
                 // int result = z_simple_read(qps[0], ((char*)local_buf), mr->lkey, write_size, (void*)(addr), rkey);
-                result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
+                int result = z_simple_CAS(qps[0], ((char*)local_buf), mr->lkey, target, (void*)(addr), rkey);
                 // result = z_CAS(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey);
                 // result = z_CAS_async(qps[0], ((char*)local_buf)+j*sizeof(uint64_t), mr->lkey, target, (void*)(addr)+j*sizeof(uint64_t), rkey, &wr_ids);
                 // printf("%d:%d\n", *counter, target);
@@ -208,7 +207,7 @@ void test_zQP_shared(string config_file, string remote_config_file, int thread_i
         rpc_qps.push_back(rpc_qp);
     }
     size_t alloc_size = 1024*1024;
-    for(int i = 0; i < qps.size(); i ++) {
+    for(uint64_t i = 0; i < qps.size(); i ++) {
         uint64_t addr;
         uint32_t rkey;
         zQP_RPC_Alloc(rpc_qps[i], &addr, &rkey, alloc_size);
@@ -243,7 +242,7 @@ void test_zQP_shared(string config_file, string remote_config_file, int thread_i
         std::vector<uint64_t> wr_ids;
         auto star_time = TIME_NOW;
         for(int k = 0; k < 4000; k++) {
-            for(int j = 0; j < alloc_size / (4096); j++){
+            for(uint64_t j = 0; j < alloc_size / (4096); j++){
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
                 // z_write(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey);
                 z_write_async(qps[i], ((char*)local_buf)+ j * 4096, mr->lkey, 4096, (void*)(addr), rkey, &wr_ids);
@@ -255,7 +254,7 @@ void test_zQP_shared(string config_file, string remote_config_file, int thread_i
         double total_us = TIME_DURATION_US(star_time, end_time);
         double throughput = (double)(alloc_size * 1000) / (total_us);
         double average_latency = total_us / (alloc_size * 1000);
-        printf("Thread %d, QP %d, Time spend: %f us, Average Latency: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, average_latency, throughput);
+        printf("Thread %d, QP %lu, Time spend: %f us, Average Latency: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, average_latency, throughput);
         // memset(local_buf, 0, alloc_size);
         // for(int j = 0; j < alloc_size / sizeof(uint64_t); j++){
         //     // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);

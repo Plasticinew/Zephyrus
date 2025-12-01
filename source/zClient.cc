@@ -1,6 +1,7 @@
-#include "zQP.h"
+#include "zqp.h"
+#include "zrdma.h"
 
-using namespace Zephyrus;
+using namespace zrdma;
 
 pthread_barrier_t barrier_start;
 
@@ -21,7 +22,7 @@ void test_zQP_shared(string config_file, string remote_config_file, zEndpoint* e
         rpc_qps.push_back(rpc_qp);
     }
     size_t alloc_size = 1024;
-    for(int i = 0; i < qps.size(); i ++) {
+    for(uint64_t i = 0; i < qps.size(); i ++) {
         uint64_t addr;
         uint32_t rkey;
         zQP_RPC_Alloc(rpc_qps[i], &addr, &rkey, alloc_size);
@@ -57,7 +58,7 @@ void test_zQP_shared(string config_file, string remote_config_file, zEndpoint* e
         std::vector<uint64_t> wr_ids;
         auto star_time = TIME_NOW;
         for(int k = 0; k < 1000; k++) {
-            for(int j = 0; j < alloc_size ; j++){
+            for(uint64_t j = 0; j < alloc_size ; j++){
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
                 // z_write(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey);
                 z_write_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey, &wr_ids);
@@ -68,37 +69,37 @@ void test_zQP_shared(string config_file, string remote_config_file, zEndpoint* e
         auto end_time = TIME_NOW;
         double total_us = TIME_DURATION_US(star_time, end_time);
         double throughput = (double)(alloc_size * 1000) / (total_us);
-        printf("Thread %d, QP %d, Time spend: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, throughput);
+        printf("Thread %d, QP %lu, Time spend: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, throughput);
         // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
         // zDCQP_read(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        for(int j = 0; j < alloc_size; j++){
+        for(uint64_t j = 0; j < alloc_size; j++){
             // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             // z_read(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey);
             z_read_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey, &wr_ids);
         }
         z_poll_completion(qps[i], &wr_ids);
-        for(int j = 0; j < alloc_size; j++) {
+        for(uint64_t j = 0; j < alloc_size; j++) {
             if(((char*)local_buf)[j] != 1) {
-                printf("Data mismatch at byte %d: expected 1, got %d\n", j, ((char*)local_buf)[j]);
+                printf("Data mismatch at byte %lu: expected 1, got %d\n", j, ((char*)local_buf)[j]);
                 break;
             }
         }
 
         sleep(1);
         pthread_barrier_wait(&barrier_start);
-        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+        for(uint64_t j = 0; j < alloc_size / sizeof(uint64_t); j++) {
             // zDCQP_CAS(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, ((uint64_t*)local_buf)+j, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], 2, (void*)((uint64_t)addr + j * sizeof(uint64_t)), table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             z_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey);
         }
         memset(local_buf, 0, alloc_size);
         // sleep(10);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+        for(uint64_t j = 0; j < alloc_size / sizeof(uint64_t); j++) {
             if(((uint64_t*)local_buf)[j] != 2) {
-                printf("CAS Data mismatch at uint64 %d, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
+                printf("CAS Data mismatch at uint64 %lu, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
                 // break;
             }
         }
@@ -126,7 +127,7 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         rpc_qps.push_back(rpc_qp);
     }
     size_t alloc_size = 1024;
-    for(int i = 0; i < qps.size(); i ++) {
+    for(uint64_t i = 0; i < qps.size(); i ++) {
         uint64_t addr;
         uint32_t rkey;
         zQP_RPC_Alloc(rpc_qps[i], &addr, &rkey, alloc_size);
@@ -162,7 +163,7 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         std::vector<uint64_t> wr_ids;
         auto star_time = TIME_NOW;
         for(int k = 0; k < 1000; k++) {
-            for(int j = 0; j < alloc_size ; j++){
+            for(uint64_t j = 0; j < alloc_size ; j++){
                 // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
                 z_write(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey);
                 // z_write_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j), rkey, &wr_ids);
@@ -173,37 +174,37 @@ void test_zQP(string config_file, string remote_config_file, int thread_id) {
         auto end_time = TIME_NOW;
         double total_us = TIME_DURATION_US(star_time, end_time);
         double throughput = (double)(alloc_size * 1000) / (total_us);
-        printf("Thread %d, QP %d, Time spend: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, throughput);
+        printf("Thread %d, QP %lu, Time spend: %f us, Throughput: %f MB/s\n", thread_id, i, total_us, throughput);
         // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_write(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
         memset(local_buf, 0, alloc_size);
         // zDCQP_read(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
         // z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        for(int j = 0; j < alloc_size; j++){
+        for(uint64_t j = 0; j < alloc_size; j++){
             // zDCQP_write(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, local_buf, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], alloc_size, (void*)addr, table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             z_read(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey);
             // z_read_async(qps[i], ((char*)local_buf)+j, mr->lkey, sizeof(char), (void*)(addr + j * sizeof(char)), rkey, &wr_ids);
         }
         // z_poll_completion(qps[i], &wr_ids);
-        for(int j = 0; j < alloc_size; j++) {
+        for(uint64_t j = 0; j < alloc_size; j++) {
             if(((char*)local_buf)[j] != 1) {
-                printf("Data mismatch at byte %d: expected 1, got %d\n", j, ((char*)local_buf)[j]);
+                printf("Data mismatch at byte %lu: expected 1, got %d\n", j, ((char*)local_buf)[j]);
                 break;
             }
         }
 
         sleep(1);
         pthread_barrier_wait(&barrier_start);
-        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+        for(uint64_t j = 0; j < alloc_size / sizeof(uint64_t); j++) {
             // zDCQP_CAS(qps[i]->m_pd->m_requestors[nic_index][0], qps[i]->m_targets[nic_index]->ah, ((uint64_t*)local_buf)+j, qps[i]->m_pd->m_lkey_table[mr->lkey][nic_index], 2, (void*)((uint64_t)addr + j * sizeof(uint64_t)), table->at(rkey)[nic_index], qps[i]->m_targets[nic_index]->lid_, qps[i]->m_targets[nic_index]->dct_num_);
             z_CAS(qps[i], ((uint64_t*)local_buf)+j, mr->lkey, 2, (void*)(addr + j * sizeof(uint64_t)), rkey);
         }
         memset(local_buf, 0, alloc_size);
         // sleep(10);
         z_read(qps[i], local_buf, mr->lkey, alloc_size, (void*)addr, rkey);
-        for(int j = 0; j < alloc_size / sizeof(uint64_t); j++) {
+        for(uint64_t j = 0; j < alloc_size / sizeof(uint64_t); j++) {
             if(((uint64_t*)local_buf)[j] != 2) {
-                printf("CAS Data mismatch at uint64 %d, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
+                printf("CAS Data mismatch at uint64 %lu, value: %lu\n", j, ((uint64_t*)local_buf)[j]);
                 // break;
             }
         }

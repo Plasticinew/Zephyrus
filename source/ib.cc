@@ -1,6 +1,6 @@
-#include "zQP.h"
+#include "zqp.h"
 
-namespace Zephyrus {
+namespace zrdma {
 
 static int modify_qp_to_init(struct ibv_qp * qp, const struct QpInfo * local_qp_info) {
     struct ibv_qp_attr attr;
@@ -106,7 +106,7 @@ int ib_connect_qp(struct ibv_qp * local_qp,
     
     // assert(!server);
     rc = modify_qp_to_rts(local_qp);
-    // assert(rc == 0);
+    assert(rc == 0);
     return 0;
 }
 
