@@ -592,7 +592,7 @@ namespace Zephyrus
         int depth = 0;
         while (p != NULL)
         {
-            if( max_depth >= 0 && depth++ >= max_depth)
+            if (max_depth >= 0 && depth++ >= max_depth)
             {
                 break;
             }
@@ -1764,10 +1764,13 @@ namespace Zephyrus
     int zQP_post_send(zQP *zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent,
                       uint32_t time_stamp, bool unique_cas, int max_depth)
     {
+        vector<ibv_send_wr*> copy_wrs;
+        vector<ibv_sge*> copy_sges;
+        vector<zWR_entry*> wr_entries;
         ibv_send_wr *copy_wr = new ibv_send_wr();
         ibv_send_wr *p = send_wr;
         ibv_send_wr *q = copy_wr;
-        std::set<ibv_send_wr*> wr_set;
+        std::set<ibv_send_wr *> wr_set;
         int start_index = -1;
         int end_index = 0;
         bool retry = false;
@@ -1776,7 +1779,7 @@ namespace Zephyrus
         int depth = 0;
         while (p != NULL)
         {
-            if(max_depth >= 0 && depth++ >= max_depth)
+            if (max_depth >= 0 && depth++ >= max_depth)
             {
                 q->next = NULL;
                 break;
@@ -1860,7 +1863,10 @@ namespace Zephyrus
             {
                 struct ibv_sge *log_sge = new ibv_sge();
                 struct ibv_send_wr *log_wr = new ibv_send_wr();
+                copy_wrs.push_back(log_wr);
+                copy_sges.push_back(log_sge);
                 zWR_entry *entry = new zWR_entry();
+                wr_entries.push_back(entry);
                 entry->time_stamp = time_stamp;
                 entry->wr_addr = (uint64_t)q;
                 entry->finished = 1;
@@ -1900,6 +1906,7 @@ namespace Zephyrus
             else
             {
                 q->next = NULL;
+                break;
             }
         }
         q->send_flags |= IBV_SEND_SIGNALED;
@@ -1914,22 +1921,24 @@ namespace Zephyrus
         ibv_qp *qp = requestor->qp_;
         if (ibv_post_send(qp, copy_wr, bad_wr))
         {
-            if(end_index < start_index)
+            if (end_index < start_index)
                 end_index += WR_ENTRY_NUM;
-            for(int i = start_index; i <= end_index; i++)
-                zqp->wr_entry_[i%WR_ENTRY_NUM].finished = 1;
+            for (int i = start_index; i <= end_index; i++)
+                zqp->wr_entry_[i % WR_ENTRY_NUM].finished = 1;
             perror("Error, ibv_post_send failed");
         }
-        for(auto p = copy_wr; p != NULL; ) {
-            ibv_send_wr* next = p->next;
-            if(p->opcode == IBV_WR_RDMA_READ){
-                if(p->sg_list)
-                    free(p->sg_list);
-                delete p;
+        for (auto k = copy_wr; k != NULL;)
+        {
+            ibv_send_wr *next = k->next;
+            if (k->opcode == IBV_WR_RDMA_READ)
+            {
+                if (k->sg_list)
+                    free(k->sg_list);
+                delete k;
             }
-            p = next;
+            k = next;
         }
-        q->next = NULL;
+        // q->next = NULL;
 #ifndef POLLTHREAD
         int result;
         auto start = TIME_NOW;
@@ -1962,10 +1971,10 @@ namespace Zephyrus
                 break;
             }
         }
-        if(end_index < start_index)
+        if (end_index < start_index)
             end_index += WR_ENTRY_NUM;
-        for(int i = start_index; i <= end_index; i++)
-            zqp->wr_entry_[i%WR_ENTRY_NUM].finished = 1;
+        for (int i = start_index; i <= end_index; i++)
+            zqp->wr_entry_[i % WR_ENTRY_NUM].finished = 1;
         int start_ = zqp->entry_start_;
         int end_ = zqp->entry_end_.load() % WR_ENTRY_NUM;
         if (start_ > end_)
@@ -1978,7 +1987,7 @@ namespace Zephyrus
                     wr_set.find((ibv_send_wr *)zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr) != wr_set.end())
                 {
                     wr_set.erase((ibv_send_wr *)zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr);
-                    delete ((ibv_send_wr *)zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr)->sg_list;
+                    free(((ibv_send_wr *)zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr)->sg_list);
                     delete (ibv_send_wr *)zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr;
                     zqp->wr_entry_[i % WR_ENTRY_NUM].wr_addr = 0;
                     zqp->wr_entry_[i % WR_ENTRY_NUM].finished = 1;
@@ -1990,6 +1999,15 @@ namespace Zephyrus
                     zqp->entry_start_ = (zqp->entry_start_ + 1) % WR_ENTRY_NUM;
                 }
             }
+        }
+        for (auto wr : copy_wrs) {
+            delete wr;
+        }
+        for (auto sge : copy_sges) {
+            delete sge;
+        }
+        for (auto entry : wr_entries) {
+            delete entry;
         }
         // zqp->size_counter_.fetch_add(length);
         return result;
@@ -3141,8 +3159,7 @@ namespace Zephyrus
 #endif
                     // attention: 48bit address to 64bit address
                     z_post_send(qp, send_wr, nullptr, true, local_time, true, 1);
-                    // printf("qp %d resend local timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, \
-                    //     addr %lx, length %u\n", qp->qp_id_, local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
+                    // printf("qp %d resend local timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", qp->qp_id_, local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                     int start_ = qp->entry_start_;
                     int end_ = qp->entry_end_.load() % WR_ENTRY_NUM;
                     if (start_ > end_)
@@ -3154,7 +3171,7 @@ namespace Zephyrus
                             if (qp->wr_entry_[i % WR_ENTRY_NUM].time_stamp == local_time &&
                                 qp->wr_entry_[i % WR_ENTRY_NUM].wr_addr == (uint64_t)send_wr)
                             {
-                                delete ((ibv_send_wr *)qp->wr_entry_[i % WR_ENTRY_NUM].wr_addr)->sg_list;
+                                free(((ibv_send_wr *)qp->wr_entry_[i % WR_ENTRY_NUM].wr_addr)->sg_list);
                                 delete (ibv_send_wr *)qp->wr_entry_[i % WR_ENTRY_NUM].wr_addr;
                                 qp->wr_entry_[i % WR_ENTRY_NUM].wr_addr = 0;
                                 qp->wr_entry_[i % WR_ENTRY_NUM].finished = 1;
@@ -3171,23 +3188,25 @@ namespace Zephyrus
                 {
                     // printf("finished timestamp %d, remote timestamp %d, wr_id %lu, opcode %d, addr %lx, length %u\n", local_time, remote_time, send_wr->wr_id, send_wr->opcode, send_wr->sg_list->addr, send_wr->sg_list->length);
                     auto p = send_wr;
-                    while (p != nullptr)
+                    // while (p != nullptr)
+                    // {
+                    if (p->opcode == IBV_WR_ATOMIC_CMP_AND_SWP)
                     {
-                        if (p->opcode == IBV_WR_ATOMIC_CMP_AND_SWP)
+                        zAtomic_buffer *buffer = (zAtomic_buffer *)(&entry[i % WR_ENTRY_NUM]);
+                        if (buffer->finished != 1)
                         {
-                            zAtomic_buffer *buffer = (zAtomic_buffer *)(&entry[i % WR_ENTRY_NUM]);
-                            if (buffer->finished != 1)
+                            int new_val = qp->wr_entry_[i % WR_ENTRY_NUM].reserved;
+                            z_read(qp, (void *)&entry[i % WR_ENTRY_NUM].reserved, 
+                                qp->resp_mr_[qp->current_device]->lkey, sizeof(uint64_t), 
+                                (void *)p->wr.atomic.remote_addr, p->wr.atomic.rkey);
+                            if (entry[i % WR_ENTRY_NUM].reserved != p->wr.atomic.swap)
                             {
-                                int new_val = qp->wr_entry_[i % WR_ENTRY_NUM].reserved;
-                                z_read(qp, (void *)&entry[i % WR_ENTRY_NUM].reserved, qp->resp_mr_[qp->current_device]->lkey, sizeof(uint64_t), (void *)p->wr.atomic.remote_addr, p->wr.atomic.rkey);
-                                if (entry[i % WR_ENTRY_NUM].reserved != p->wr.atomic.swap)
-                                {
-                                    *(uint64_t *)p->sg_list->addr = entry[i % WR_ENTRY_NUM].reserved;
-                                }
+                                *(uint64_t *)p->sg_list->addr = entry[i % WR_ENTRY_NUM].reserved;
                             }
                         }
-                        p = p->next;
                     }
+                    //     p = p->next;
+                    // }
 #endif
                 }
             }

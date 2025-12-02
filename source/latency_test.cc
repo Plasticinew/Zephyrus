@@ -190,11 +190,11 @@ void test_zQP_shared_p2p(string config_file, string remote_config_file, int thre
             // printf("%d:%d\n", *counter, target);
             for(int i = 0; i < wr_num; i++) {
                 if(counter[i] != prev[i]){
-                    printf("CAS %d error!\n", i);
+                    printf("CAS %d error! %lu -> %lu\n", i, prev[i], counter[i]);
                 }
             }
             if(result < 0) {
-                printf("%d:%d\n", *counter, target);
+                // printf("%d:%d\n", *counter, target);
                 z_read(qps[0], ((char*)local_buf), mr->lkey, 8 * wr_num, (void*)(addr), rkey);
                 for(int i = 0; i < wr_num; i++) {
                     if(counter[i] != target) {
