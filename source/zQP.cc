@@ -2019,14 +2019,26 @@ namespace Zephyrus
     int zQP_post_send_async(zQP *zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent,
                             uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth)
     {
+                vector<ibv_send_wr*> copy_wrs;
+        vector<ibv_sge*> copy_sges;
+        vector<zWR_entry*> wr_entries;
         ibv_send_wr *copy_wr = new ibv_send_wr();
         ibv_send_wr *p = send_wr;
         ibv_send_wr *q = copy_wr;
+        std::set<ibv_send_wr *> wr_set;
+        int start_index = -1;
+        int end_index = 0;
         bool retry = false;
         // deep copy
         zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
+        int depth = 0;
         while (p != NULL)
         {
+            if (max_depth >= 0 && depth++ >= max_depth)
+            {
+                q->next = NULL;
+                break;
+            }
             memcpy(q, p, sizeof(ibv_send_wr));
             ibv_sge *sge = (ibv_sge *)malloc(sizeof(ibv_sge) * p->num_sge);
             if (p->sg_list != NULL)
@@ -2051,8 +2063,15 @@ namespace Zephyrus
                     zqp->m_pd->m_lkey_table.find(a, p->sg_list[i].lkey);
                     q->sg_list[i].lkey = a->second[zqp->current_device];
                 }
-                q->wr.rdma.rkey = zqp->m_rkey_table->at(p->wr.rdma.rkey)[zqp->current_device];
-                p = p->next;
+                if (q->opcode == IBV_WR_ATOMIC_CMP_AND_SWP)
+                {
+                    q->wr.atomic.rkey = zqp->m_rkey_table->at(p->wr.atomic.rkey)[zqp->current_device];
+                }
+                else
+                {
+                    q->wr.rdma.rkey = zqp->m_rkey_table->at(p->wr.rdma.rkey)[zqp->current_device];
+                }
+                // p = p->next;
             }
             if (!unique_cas && q->opcode == IBV_WR_ATOMIC_CMP_AND_SWP)
             {
@@ -2094,8 +2113,47 @@ namespace Zephyrus
                 q = q->next;
                 // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
             }
+            else if (p->opcode == IBV_WR_SEND || p->opcode == IBV_WR_RDMA_WRITE ||
+                     p->opcode == IBV_WR_RDMA_WRITE_WITH_IMM || p->opcode == IBV_WR_ATOMIC_CMP_AND_SWP)
+            {
+                struct ibv_sge *log_sge = new ibv_sge();
+                struct ibv_send_wr *log_wr = new ibv_send_wr();
+                copy_wrs.push_back(log_wr);
+                copy_sges.push_back(log_sge);
+                zWR_entry *entry = new zWR_entry();
+                wr_entries.push_back(entry);
+                entry->time_stamp = time_stamp;
+                entry->wr_addr = (uint64_t)q;
+                entry->finished = 1;
+                wr_set.insert(q);
+                int entry_index = zqp->entry_end_.fetch_add(1) % WR_ENTRY_NUM;
+                if (start_index == -1)
+                {
+                    start_index = entry_index;
+                }
+                end_index = entry_index;
+                zqp->wr_entry_[entry_index].time_stamp = entry->time_stamp;
+                zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
+                zqp->wr_entry_[entry_index].finished = 0;
+                uint64_t wr_id = *((uint64_t *)(&zqp->wr_entry_[entry_index]) + 1);
+
+                log_sge->addr = (uint64_t)(entry);
+                log_sge->length = sizeof(zWR_entry);
+                log_sge->lkey = 0;
+                log_wr->wr_id = wr_id;
+                log_wr->sg_list = log_sge;
+                log_wr->num_sge = 1;
+                log_wr->next = q->next;
+                log_wr->opcode = IBV_WR_RDMA_WRITE;
+                log_wr->send_flags = IBV_SEND_INLINE;
+                log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
+                log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
+                q->next = log_wr;
+                q->send_flags &= ~IBV_SEND_SIGNALED;
+                q = q->next;
+            }
             p = p->next;
-            if (p != NULL)
+            if (p != NULL && (max_depth < 0 || depth < max_depth))
             {
                 q->next = new ibv_send_wr();
                 q = q->next;
@@ -2103,66 +2161,54 @@ namespace Zephyrus
             else
             {
                 q->next = NULL;
+                break;
             }
         }
+        q->send_flags |= IBV_SEND_SIGNALED;
         if (retry != non_idempotent)
         {
             std::cerr << "Warning, inconsistent non_idempotent flag" << std::endl;
             non_idempotent = retry;
         }
 
-        struct ibv_sge *log_sge = new ibv_sge();
-        struct ibv_send_wr *log_wr = new ibv_send_wr();
-
-        zWR_entry *entry = new zWR_entry();
-        entry->time_stamp = time_stamp;
-        entry->wr_addr = (uint64_t)copy_wr;
-        entry->finished = 1;
-
-        int entry_index = zqp->entry_end_.fetch_add(1) % WR_ENTRY_NUM;
-        zqp->wr_entry_[entry_index].time_stamp = entry->time_stamp;
-        zqp->wr_entry_[entry_index].wr_addr = entry->wr_addr;
-        zqp->wr_entry_[entry_index].finished = 0;
-        uint64_t wr_id = *((uint64_t *)(&zqp->wr_entry_[entry_index]) + 1);
-
-        if (non_idempotent)
-        {
-            log_sge->addr = (uint64_t)(entry);
-            log_sge->length = sizeof(zWR_entry);
-            log_sge->lkey = 0;
-            log_wr->wr_id = wr_id;
-            log_wr->sg_list = log_sge;
-            log_wr->num_sge = 1;
-            log_wr->next = NULL;
-            log_wr->opcode = IBV_WR_RDMA_WRITE;
-            log_wr->send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE | IBV_SEND_FENCE;
-            log_wr->wr.rdma.remote_addr = requestor->server_cmd_msg_ + entry_index * sizeof(zWR_entry);
-            log_wr->wr.rdma.rkey = requestor->server_cmd_rkey_[zqp->current_device];
-        }
-
-        if (non_idempotent)
-            q->next = log_wr;
-        if (non_idempotent)
-            q->send_flags &= ~IBV_SEND_SIGNALED;
+        // wr_ids->push_back(wr_id);
+        // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
         ibv_qp *qp = requestor->qp_;
         if (ibv_post_send(qp, copy_wr, bad_wr))
         {
-            zqp->wr_entry_[entry_index].finished = 1;
+            if (end_index < start_index)
+                end_index += WR_ENTRY_NUM;
+            for (int i = start_index; i <= end_index; i++)
+                zqp->wr_entry_[i % WR_ENTRY_NUM].finished = 1;
             perror("Error, ibv_post_send failed");
         }
-        wr_ids->push_back(wr_id);
-        // zqp->entry_end_ = (zqp->entry_end_ + 1)%WR_ENTRY_NUM;
-
-        delete entry;
-        if (non_idempotent)
+        for (auto k = copy_wr; k != NULL;)
         {
-            delete log_sge;
-            delete log_wr;
+            ibv_send_wr *next = k->next;
+            if (k->opcode == IBV_WR_RDMA_READ)
+            {
+                if (k->sg_list)
+                    free(k->sg_list);
+                delete k;
+            }
+            k = next;
         }
-        q->next = NULL;
-        return 0;
+        wr_ids->push_back(q->wr_id);
+        // q->next = NULL;
+        int result;
+        for (auto wr : copy_wrs) {
+            delete wr;
+        }
+        for (auto sge : copy_sges) {
+            delete sge;
+        }
+        for (auto entry : wr_entries) {
+            delete entry;
+        }
+        // zqp->size_counter_.fetch_add(length);
+        return result;
     }
-
+    
     int zQP_read_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t length, void *remote_addr, uint32_t rkey, uint32_t time_stamp, vector<uint64_t> *wr_ids)
     {
         zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
