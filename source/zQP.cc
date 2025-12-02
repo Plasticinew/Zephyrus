@@ -13,7 +13,7 @@
 
 // #define NO_ERROR_HANDLE
 
-namespace Zephyrus
+namespace zrdma
 {
 
     std::mutex zQP_connect_mutex;
@@ -1446,6 +1446,60 @@ namespace Zephyrus
 #endif
     }
 
+
+    int z_poll_till_completion(zQP *qp) {
+        zQP_requestor *requestor = qp->m_requestors[qp->current_device];
+        int result;
+        auto start = TIME_NOW;
+        struct ibv_wc wc;
+        ibv_cq *cq = requestor->cq_;
+        while (true)
+        {
+            if (TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US)
+            {
+                z_switch(qp);
+#ifdef RECOVERY
+                z_recovery(qp);
+#endif
+                result = -1;
+                // std::cerr << "Error, read timeout" << std::endl;
+                break;
+            }
+            if (ibv_poll_cq(cq, 1, &wc) > 0)
+            {
+                if (wc.status != IBV_WC_SUCCESS)
+                {
+                    z_switch(qp);
+#ifdef RECOVERY
+                    z_recovery(qp);
+#endif
+                    result = -1;
+                    break;
+                }
+                result = 0;
+                break;
+            }
+        }
+        // qp->size_counter_.fetch_add(length);
+        return result;
+    }
+
+    int z_poll_send_completion(zQP *qp, ibv_wc& wc) {
+        zQP_requestor *requestor = qp->m_requestors[qp->current_device];
+        ibv_cq *cq = requestor->cq_;
+        int ret = ibv_poll_cq(cq, 1, &wc);
+        if(ret > 0) {
+            if (wc.status != IBV_WC_SUCCESS)
+                {
+                    z_switch(qp);
+#ifdef RECOVERY
+                    z_recovery(qp);
+#endif
+                }
+        }
+        return ret;
+    }
+
     int zQP_write(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t length, void *remote_addr, uint32_t rkey, uint32_t time_stamp, bool use_log)
     {
         zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
@@ -2017,7 +2071,7 @@ namespace Zephyrus
     }
 
     int zQP_post_send_async(zQP *zqp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent,
-                            uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth)
+                            uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth, int wr_id)
     {
                 vector<ibv_send_wr*> copy_wrs;
         vector<ibv_sge*> copy_sges;
@@ -2141,6 +2195,9 @@ namespace Zephyrus
                 log_sge->length = sizeof(zWR_entry);
                 log_sge->lkey = 0;
                 log_wr->wr_id = wr_id;
+                if(q->wr_id != 0) {
+                    log_wr->wr_id = q->wr_id;
+                }
                 log_wr->sg_list = log_sge;
                 log_wr->num_sge = 1;
                 log_wr->next = q->next;
@@ -2165,6 +2222,9 @@ namespace Zephyrus
             }
         }
         q->send_flags |= IBV_SEND_SIGNALED;
+        if(wr_id != -1) {
+            q->wr_id = wr_id;
+        }
         if (retry != non_idempotent)
         {
             std::cerr << "Warning, inconsistent non_idempotent flag" << std::endl;
@@ -2208,7 +2268,7 @@ namespace Zephyrus
         // zqp->size_counter_.fetch_add(length);
         return result;
     }
-    
+
     int zQP_read_async(zQP *zqp, void *local_addr, uint32_t lkey, uint64_t length, void *remote_addr, uint32_t rkey, uint32_t time_stamp, vector<uint64_t> *wr_ids)
     {
         zQP_requestor *requestor = zqp->m_requestors[zqp->current_device];
@@ -2630,8 +2690,59 @@ namespace Zephyrus
         return;
     }
 
+    void zQP_RPC_GetAddr(zQP *qp, uint64_t *addr, uint32_t *rkey)
+    {
+        zQP_requestor *requestor = qp->m_requestors[qp->current_device];
+        memset(requestor->cmd_msg_, 0, sizeof(CmdMsgBlock));
+        memset(requestor->cmd_resp_, 0, sizeof(CmdMsgRespBlock));
+        requestor->cmd_resp_->notify = NOTIFY_IDLE;
+        RegisterRequest *request = (RegisterRequest *)requestor->cmd_msg_;
+        request->resp_addr = (uint64_t)requestor->cmd_resp_;
+        request->resp_rkey = requestor->resp_mr_->rkey;
+        request->id = requestor->conn_id_;
+        request->type = MSG_FETCH;
+        request->size = 0;
+        requestor->cmd_msg_->notify = NOTIFY_WORK;
+
+        // printf("cmd_resp: %lx, rkey: %u\n", requestor->cmd_resp_, requestor->resp_mr_->rkey);
+        // printf("cmd_resp: %lx, rkey: %u\n", request->resp_addr, request->resp_rkey);
+
+        /* send a request to sever */
+        qp->time_stamp = (qp->time_stamp + 1) % MAX_REQUESTOR_NUM;
+#ifdef POLLTHREAD
+        zQP_write(qp, (void *)requestor->cmd_msg_, requestor->msg_mr_->lkey, sizeof(CmdMsgBlock), (void *)requestor->server_cmd_msg_, requestor->server_cmd_rkey_[qp->current_device], qp->time_stamp, false);
+#else
+        z_simple_write(qp, (void *)requestor->cmd_msg_, requestor->msg_mr_->lkey, sizeof(CmdMsgBlock), (void *)requestor->server_cmd_msg_, requestor->server_cmd_rkey_[qp->current_device]);
+#endif
+        /* wait for response */
+        auto start = TIME_NOW;
+        while (requestor->cmd_resp_->notify == NOTIFY_IDLE)
+        {
+            if (TIME_DURATION_US(start, TIME_NOW) > RDMA_TIMEOUT_US * 1000)
+            {
+                printf("wait for request completion timeout\n");
+                return;
+            }
+        }
+        RegisterResponse *resp_msg = (RegisterResponse *)requestor->cmd_resp_;
+        if (resp_msg->status != RES_OK)
+        {
+            printf("register remote memory fail\n");
+            return;
+        }
+        *addr = resp_msg->addr;
+        for (int i = 0; i < MAX_NIC_NUM; i++)
+        {
+            if (qp->m_rkey_table->find(resp_msg->rkey[0]) == qp->m_rkey_table->end())
+                (*qp->m_rkey_table)[resp_msg->rkey[0]] = std::vector<uint32_t>();
+            qp->m_rkey_table->at(resp_msg->rkey[0]).push_back(resp_msg->rkey[i]);
+        }
+        *rkey = resp_msg->rkey[0];
+        return;
+    }
+
     int z_post_send_async(zQP *qp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent,
-                          uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth)
+                          uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth, int wr_id)
     {
         while (qp->m_ep->m_devices[qp->current_device]->status.load() == ZSTATUS_ERROR)
         {
@@ -2649,11 +2760,11 @@ namespace Zephyrus
         if (qp->m_requestors.size() > qp->current_device && qp->m_requestors[qp->current_device] != NULL && qp->m_requestors[qp->current_device]->status_ == ZSTATUS_CONNECTED)
         {
             qp->time_stamp = (qp->time_stamp + 1) % MAX_REQUESTOR_NUM;
-            int result = zQP_post_send_async(qp, send_wr, bad_wr, non_idempotent, qp->time_stamp, wr_ids, unique_cas, max_depth);
+            int result = zQP_post_send_async(qp, send_wr, bad_wr, non_idempotent, qp->time_stamp, wr_ids, unique_cas, max_depth, wr_id);
             if (result == -1)
             {
                 z_switch(qp);
-                return z_post_send_async(qp, send_wr, bad_wr, non_idempotent, time_stamp, wr_ids, unique_cas, max_depth);
+                return z_post_send_async(qp, send_wr, bad_wr, non_idempotent, time_stamp, wr_ids, unique_cas, max_depth, wr_id);
             }
             return result;
         }
@@ -3270,6 +3381,75 @@ namespace Zephyrus
         return mr;
     }
 
+
+    ibv_mr *mr_create(zPD *pd, void* addr, size_t length)
+    {
+        ibv_mr *primary_mr = mr_create(pd->m_pds[0], (void *)addr, length);
+        if (primary_mr == NULL)
+        {
+            munmap((void *)addr, length);
+            return NULL;
+        }
+        tbb::concurrent_hash_map<ibv_mr *, tbb::concurrent_vector<ibv_mr *>>::accessor a;
+        if (pd->m_mrs.find(a, primary_mr))
+        {
+            a->second.push_back(primary_mr);
+        }
+        else
+        {
+            tbb::concurrent_vector<ibv_mr *> mr_list;
+            mr_list.push_back(primary_mr);
+            pd->m_mrs.insert(tbb::concurrent_hash_map<ibv_mr *, tbb::concurrent_vector<ibv_mr *>>::value_type(primary_mr, mr_list));
+            // pd->m_mrs.insert(std::make_pair(primary_mr, mr_list));
+        }
+        tbb::concurrent_hash_map<uint32_t, tbb::concurrent_vector<uint32_t>>::accessor b;
+        if (pd->m_lkey_table.find(b, primary_mr->lkey))
+        {
+            b->second.push_back(primary_mr->lkey);
+        }
+        else
+        {
+            tbb::concurrent_vector<uint32_t> lkey_list;
+            lkey_list.push_back(primary_mr->lkey);
+            pd->m_lkey_table.insert(tbb::concurrent_hash_map<uint32_t, tbb::concurrent_vector<uint32_t>>::value_type(primary_mr->lkey, lkey_list));
+            // pd->m_lkey_table.insert(std::make_pair(primary_mr->lkey, lkey_list));
+        }
+        // pd->m_mrs[primary_mr].push_back(primary_mr);
+        // pd->m_lkey_table[primary_mr->lkey].push_back(primary_mr->lkey);
+        for (int i = 1; i < pd->m_pds.size(); i++)
+        {
+            ibv_mr *mr = mr_create(pd->m_pds[i], (void *)addr, length);
+            tbb::concurrent_hash_map<ibv_mr *, tbb::concurrent_vector<ibv_mr *>>::accessor c;
+            if (pd->m_mrs.find(c, primary_mr))
+            {
+                c->second.push_back(mr);
+            }
+            else
+            {
+                tbb::concurrent_vector<ibv_mr *> mr_list;
+                mr_list.push_back(mr);
+                // pd->m_mrs.insert(std::make_pair(primary_mr, mr_list));
+                pd->m_mrs.insert(tbb::concurrent_hash_map<ibv_mr *, tbb::concurrent_vector<ibv_mr *>>::value_type(mr, mr_list));
+            }
+            tbb::concurrent_hash_map<uint32_t, tbb::concurrent_vector<uint32_t>>::accessor d;
+            if (pd->m_lkey_table.find(d, primary_mr->lkey))
+            {
+                d->second.push_back(mr->lkey);
+            }
+            else
+            {
+                tbb::concurrent_vector<uint32_t> lkey_list;
+                lkey_list.push_back(mr->lkey);
+                pd->m_lkey_table.insert(tbb::concurrent_hash_map<uint32_t, tbb::concurrent_vector<uint32_t>>::value_type(primary_mr->lkey, lkey_list));
+                // pd->m_lkey_table.insert(std::make_pair(primary_mr->lkey, lkey_list));
+            }
+            // pd->m_mrs[primary_mr].push_back(mr);
+            // pd->m_lkey_table[primary_mr->lkey].push_back(mr->lkey);
+        }
+        return primary_mr;
+    }
+
+
     ibv_mr *mr_malloc_create(zPD *pd, uint64_t &addr, size_t length)
     {
         addr = (uint64_t)mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -3391,6 +3571,11 @@ namespace Zephyrus
 
     void zQP_worker(zPD *pd, zQP_responder *qp_instance, WorkerInfo *work_info, uint32_t num)
     {
+        ibv_mr *cache_mr;
+        uint64_t cache_addr;
+        uint64_t cache_size = (size_t)1024*1024*1024*(6) + (size_t)1024*1024*2500;
+        cache_mr = mr_malloc_create(pd, cache_addr,
+                                cache_size);
         printf("start worker %d\n", num);
         CmdMsgBlock *cmd_msg = work_info->cmd_msg;
         CmdMsgRespBlock *cmd_resp = work_info->cmd_resp_msg;
@@ -3454,8 +3639,21 @@ namespace Zephyrus
                              sizeof(CmdMsgRespBlock), reg_req->resp_addr,
                              reg_req->resp_rkey);
             }
-            else if (request->type == MSG_FETCH_FAST)
+            else if (request->type == MSG_FETCH)
             {
+                RegisterRequest *reg_req = (RegisterRequest *)request;
+                RegisterResponse *resp_msg = (RegisterResponse *)cmd_resp;
+                resp_msg->addr = (uint64_t)(cache_mr->addr);
+                tbb::concurrent_hash_map<ibv_mr *, tbb::concurrent_vector<ibv_mr *>>::accessor a;
+                pd->m_mrs.find(a, cache_mr);
+                for (int i = 0; i < a->second.size(); i++)
+                {
+                    resp_msg->rkey[i] = a->second[i]->rkey;
+                }
+                resp_msg->status = RES_OK;
+                worker_write(work_info->cm_id->qp, work_info->cq, (uint64_t)cmd_resp, resp_mr->lkey,
+                             sizeof(CmdMsgRespBlock), reg_req->resp_addr,
+                             reg_req->resp_rkey);
             }
             else if (request->type == MSG_FREE_FAST)
             {

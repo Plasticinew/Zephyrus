@@ -17,6 +17,7 @@
 #include <boost/foreach.hpp>
 #include <tbb/concurrent_hash_map.h>
 #include <tbb/concurrent_vector.h>
+#include <arpa/inet.h>
 #include <atomic>
 #include <mutex>
 
@@ -26,7 +27,7 @@ using std::thread;
 using std::unordered_map;
 using std::vector;
 
-namespace Zephyrus
+namespace zrdma
 {
 
 #define NOTIFY_WORK 0xFF
@@ -446,8 +447,11 @@ namespace Zephyrus
         uint32_t time_stamp, bool unique_cas, int max_depth=-1);
 
     void zQP_RPC_Alloc(zQP *qp, uint64_t *addr, uint32_t *rkey, size_t size);
+    void zQP_RPC_GetAddr(zQP *qp, uint64_t *addr, uint32_t *rkey);
     int worker_write(ibv_qp *qp, ibv_cq *cq, uint64_t local_addr, uint32_t lkey, uint32_t length, uint64_t remote_addr, uint32_t rkey);
 
+    int z_poll_till_completion(zQP *qp);
+    int z_poll_send_completion(zQP *qp, ibv_wc& wc);
     int z_read(zQP *qp, void *local_addr, uint32_t lkey, uint64_t length, void *remote_addr, uint32_t rkey);
     int z_write(zQP *qp, void *local_addr, uint32_t lkey, uint64_t length, void *remote_addr, uint32_t rkey);
     int z_CAS(zQP *qp, void *local_addr, uint32_t lkey, uint64_t new_val, void *remote_addr, uint32_t rkey);
@@ -461,7 +465,7 @@ namespace Zephyrus
     int z_CAS_async(zQP *qp, void *local_addr, uint32_t lkey, uint64_t new_val, void *remote_addr, 
         uint32_t rkey, vector<uint64_t> *wr_ids);
     int z_post_send_async(zQP *qp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent, 
-        uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth=-1);
+        uint32_t time_stamp, vector<uint64_t> *wr_ids, bool unique_cas, int max_depth=-1, int wr_id=-1);
     int z_post_send(zQP *qp, ibv_send_wr *send_wr, ibv_send_wr **bad_wr, bool non_idempotent, 
         uint32_t time_stamp, bool unique_cas, int max_depth=-1);
     int z_poll_completion(zQP *qp, vector<uint64_t> *wr_ids);
@@ -472,5 +476,6 @@ namespace Zephyrus
 
     ibv_mr *mr_create(ibv_pd *pd, void *addr, size_t length);
     ibv_mr *mr_malloc_create(zPD *pd, uint64_t &addr, size_t length);
+    ibv_mr *mr_create(zPD *pd, void* addr, size_t length);
 
 }

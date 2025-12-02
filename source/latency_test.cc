@@ -3,7 +3,7 @@
 #include <random>
 #include <gperftools/profiler.h>
 
-using namespace Zephyrus;
+using namespace zrdma;
 
 // #define SHARED_EP_NUM 4
 

@@ -1,6 +1,6 @@
 #include "zQP.h"
 
-using namespace Zephyrus;
+using namespace zrdma;
 
 pthread_barrier_t barrier_start;
 
